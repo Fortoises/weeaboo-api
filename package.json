@@ -1,0 +1,56 @@
+{
+  "name": "animbus",
+  "version": "1.0.4",
+  "description": "Scrapes anime from Samehadaku with AniList integration",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun run build.ts",
+    "start": "bun run dist/index.js"
+  },
+  "keywords": [
+    "anime",
+    "scraper",
+    "samehadaku",
+    "anilist",
+    "anime scraper",
+    "anime downloader",
+    "anime metadata",
+    "samehadaku scraper",
+    "anilist api",
+    "anime integration",
+    "fansub",
+    "episode tracker",
+    "typescript"
+  ],
+  "author": "akbaraditamasp <akbaraditamasp@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/akbaraditamasp/animbus.git"
+  },
+  "homepage": "https://github.com/akbaraditamasp/animbus",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "bun-plugin-dts": "^0.3.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "axios": "^1.10.0",
+    "cheerio": "^1.1.0",
+    "fuse.js": "^7.1.0"
+  }
+}
