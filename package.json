@@ -1,0 +1,22 @@
+{
+  "name": "weeaboo-api",
+  "version": "1.0.0",
+  "description": "Anime API with scraping capabilities",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "test_telegram": "bun run test_telegram_rate_limiting.ts",
+    "test_backup": "bun run test_auto_backup.ts",
+    "test_rate_limiter": "bun run test_intelligent_rate_limiting.ts"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12",
+    "bun:sqlite": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
