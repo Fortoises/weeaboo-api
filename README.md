@@ -6,7 +6,6 @@ Api scrapper anime dengan sistem bun dan Elysia.js. Menggunakan real time scrapp
 - [@Fortoises](https://www.github.com/Fortoises)
 
 ![NodeJS](https://img.shields.io/badge/nodejs-green)
-
 ## Fitur
 - **Real-time Scraping**: Fetch real time data dari website anime.
 - **Manual Override**: Bisa menambahkan anime secara manual menggunakan sistem admin.
@@ -15,7 +14,6 @@ Api scrapper anime dengan sistem bun dan Elysia.js. Menggunakan real time scrapp
 - **Secure Endpoints**: Menggunakan sistem keamanan simple untuk mengamankan API.
 - **Automated Backups**: Otomatis backup database setiap ada perubahan, backup akan ke kirim ke bot telegram ( Delay 10 detik ).
 - **API Documentation**: Otomatis generate dokumentasi menggunakan swagger dengan tampilan interaktif.
-
 # Installation
 1. **Clone repo:**
 ```bash
@@ -24,6 +22,15 @@ cd weeaboo-api
 ```
 
 2. **Install dependencies:**
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install curl -y
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install nodejs
+```
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
 ```bash
 npm install
 ```
@@ -36,10 +43,20 @@ ADMIN_TOKEN= # Token untuk pemakaian route admin
 
 # Telegram Backup
 TELEGRAM_BOT_TOKEN= # Token bot telegram dari @botfather
-TELEGRAM_CHAT_ID= # Chat id telegram
+TELEGRAM_CHAT_ID=
 
 # Base URL
 BASE_URL=https://v1.samehadaku.how # Base URL website anime scrapper
+```
+
+4. **Run Script**
+- Run nodemon ( dev )
+```bash
+bun run dev
+```
+- Run 
+```bash
+bun run start
 ```
 ## Documentation
 

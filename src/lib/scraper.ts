@@ -81,7 +81,7 @@ export const getAnime = async (id: string) => {
 
   const episodes: { title: string, videoID: string }[] = [];
   $(".epsleft a").each((_, episode) => {
-    episodes.push({ 
+    episodes.push({
         title: $(episode).text().trim(),
         videoID: new URL($(episode).attr('href')!).pathname
     });
@@ -215,4 +215,24 @@ export const getEpisodeStream = async (episodeSlug: string) => {
     title,
     streams: successfulStreams,
   };
+};
+
+export const getTop10Anime = async () => {
+  const { data } = await client.get("/");
+  const $ = load(data);
+  const animeList: any[] = [];
+
+  $(".topten-animesu ul li").each((_, el) => {
+    const element = $(el);
+    const title = element.find(".judul").text().trim();
+    const cover = element.find("img").attr("src");
+    const rating = element.find(".rating").text().trim().replace("\n", "").trim();
+    const videoID = new URL(element.find("a.series").attr("href")!).pathname;
+
+    if (title && videoID) {
+      animeList.push({ title, cover, rating, videoID });
+    }
+  });
+
+  return animeList;
 };
