@@ -1,0 +1,28 @@
+{
+  "name": "weeaboo-api",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "nodemon --exec bun run src/index.ts"
+  },
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "nodemon": "^3.1.10"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@elysiajs/html": "^1.3.0",
+    "@elysiajs/static": "^1.3.0",
+    "@elysiajs/swagger": "^1.3.1",
+    "axios": "^1.11.0",
+    "cheerio": "^1.1.2",
+    "dotenv": "^17.2.1",
+    "elysia": "^1.3.8",
+    "fuse.js": "^7.1.0",
+    "ts-node": "^10.9.2"
+  }
+}
