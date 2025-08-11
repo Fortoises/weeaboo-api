@@ -46,7 +46,9 @@ API Scrapper Anime yang dibangun dengan Bun dan Elysia.js. Dilengkapi dengan sis
     bun install
     ```
 
-3.  **Konfigurasi Lingkungan:**
+3.  **Konfigurasi:**
+
+    **File .env**
     Salin isi dari file `.env.example` ke dalam file baru bernama `.env`, kemudian isi nilainya sesuai kebutuhan Anda.
     ```dotenv
     # Keamanan
@@ -56,9 +58,19 @@ API Scrapper Anime yang dibangun dengan Bun dan Elysia.js. Dilengkapi dengan sis
     # Backup via Telegram
     TELEGRAM_BOT_TOKEN=your_telegram_bot_token # Token dari @BotFather
     TELEGRAM_CHAT_ID=your_telegram_chat_id # ID chat tujuan backup
+    ```
 
-    # Base URL (jika diperlukan)
-    BASE_URL=https://v1.samehadaku.how # URL situs sumber scraping
+    **File config.json**
+    File ini berisi URL dasar untuk situs yang di-scrape. Ubah nilainya jika domain situs sumber berubah.
+    ```json
+    {
+      "samehadaku": {
+        "baseUrl": "https://v1.samehadaku.how/"
+      },
+      "oploverz": {
+        "baseUrl": "https://www.oploverz.now/"
+      }
+    }
     ```
 
 4.  **Menjalankan Aplikasi:**
