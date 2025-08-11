@@ -4,6 +4,7 @@ import { db } from "../db/schema";
 import { scheduleBackup } from "./backup";
 import config from "../../config.json";
 import { SimpleCache } from "./cache";
+import { isCacheableHost } from "./resolver";
 
 // --- Cache Instances ---
 // Cache for 5 minutes
@@ -117,7 +118,7 @@ export const getAnime = async (id: string) => {
     studio: details["studio"],
     producers: details["producers"],
     genres,
-    streamingEpisodes: episodes.reverse(),
+    streamingEpisodes: episodes,
   };
 
   animeCache.set(id, result);
@@ -193,26 +194,12 @@ export const getStreamResource = ({ name: _, ...resource }: any) => {
 };
 
 export const getEpisodeStream = async (episodeSlug: string) => {
-  const cachedEmbeds = db.query(
-    `SELECT server_name, url FROM embeds WHERE episode_slug = ?`
-  ).all(episodeSlug) as { server_name: string; url: string }[];
-
-  if (cachedEmbeds.length > 0) {
-    console.log(`[Cache HIT] Serving embeds for ${episodeSlug} from database.`);
-    const episodeDetails = db.query(`SELECT episode_title as title FROM episodes WHERE episode_slug = ?`).get(episodeSlug) as any;
-    return {
-        title: episodeDetails?.title || episodeSlug,
-        streams: cachedEmbeds.map(e => ({ server: e.server_name, url: e.url }))
-    }
-  }
-
-  const fullUrl = new URL(episodeSlug, config.samehadaku.baseUrl).href;
-  console.log(`[Samehadaku] Attempting to scrape URL: ${fullUrl}`);
+  const sourceUrl = new URL(episodeSlug, config.samehadaku.baseUrl).href;
+  console.log(`[Samehadaku] Scraping for episode streams: ${sourceUrl}`);
 
   try {
     const servers = await getServerList(episodeSlug);
     if (!servers || servers.length === 0) {
-      console.log("[Samehadaku] No servers found for this episode.");
       return { title: "", streams: [] };
     }
 
@@ -222,36 +209,22 @@ export const getEpisodeStream = async (episodeSlug: string) => {
 
     const streamPromises = servers.map(async (server) => {
       try {
-        const streamUrl = await getStreamResource(server);
-        // Only insert into the database if the streamUrl is valid.
-        if (streamUrl) {
-          db.query(
-            `INSERT INTO embeds (episode_slug, server_name, url) VALUES (?, ?, ?)`
-          ).run(episodeSlug, server.name, streamUrl);
-        }
-        return { server: server.name, url: streamUrl };
+        const embedUrl = await getStreamResource(server);
+        return { server: server.name, embed_url: embedUrl };
       } catch (error) {
-        console.error(`[Samehadaku] Failed to get stream resource for server: ${server.name}`, error);
-        return { server: server.name, url: null };
+        console.error(`[Samehadaku] Failed to get stream resource for server: ${server.name}`);
+        return { server: server.name, embed_url: null };
       }
     });
 
-    const streams = await Promise.all(streamPromises);
-    const successfulStreams = streams.filter(s => s.url);
-
-    if (successfulStreams.length > 0) {
-        scheduleBackup();
-    }
-
-    console.log(`[Samehadaku] Successfully scraped. Found ${successfulStreams.length} streams.`);
-    console.log("[Samehadaku] Streams:", successfulStreams);
+    const streams = (await Promise.all(streamPromises)).filter(s => s.embed_url);
 
     return {
       title,
-      streams: successfulStreams,
+      streams,
     };
   } catch (error) {
-    console.error(`[Samehadaku] Failed to scrape ${fullUrl}:`, error);
+    console.error(`[Samehadaku] Failed to scrape ${sourceUrl}:`, error);
     return { title: "", streams: [] };
   }
 };
@@ -278,4 +251,62 @@ export const getTop10Anime = async () => {
 
   top10Cache.set('top10', animeList);
   return animeList;
+};
+
+export const getHomeAnime = async () => {
+  const { data } = await client.get("/");
+  const $ = load(data);
+  const list = $("div.post-show ul li");
+
+  const promises = list
+    .map((_, el) => {
+      const element = $(el);
+      const animeID = new URL(element.find("h2.entry-title a").attr("href")!)
+        .pathname;
+
+      if (animeID) {
+        return (async () => {
+          try {
+            const detailResponse = await client.get(animeID.startsWith('/') ? animeID.substring(1) : animeID);
+            const detail$ = load(detailResponse.data);
+
+            const title = detail$(".infoanime .entry-title").text().trim().replace("Nonton Anime ", "");
+            const thumbnail = detail$("div.thumb img.anmsa").attr("src");
+            const rating = parseRating(detail$("div.rtg").text().trim());
+            const synopsis = detail$("div.infox .desc p").text().trim();
+
+            const details: { [key: string]: string } = {};
+            detail$("div.spe > span").each((_, el) => {
+              const element = detail$(el);
+              const key = element.find("b").text().replace(":", "").trim().toLowerCase();
+              const value = element.text().replace(element.find("b").text(), "").trim();
+              if (key && value) {
+                details[key] = value;
+              }
+            });
+
+            return {
+              slug: animeID.replace('/anime/', '').replace('/', ''),
+              title,
+              thumbnail,
+              rating,
+              synopsis,
+              status: details["status"],
+              type: details["type"],
+              source: details["source"],
+              season: details["season"],
+              studio: details["studio"],
+              producers: details["producers"],
+            };
+          } catch (error) {
+            return null;
+          }
+        })();
+      }
+      return null;
+    })
+    .get();
+
+  const results = await Promise.all(promises);
+  return results.filter((el) => el !== null);
 };

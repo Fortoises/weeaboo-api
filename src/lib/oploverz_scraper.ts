@@ -1,8 +1,6 @@
 import axios from "axios";
 import { load } from "cheerio";
 import config from "../../config.json";
-import { db } from "../db/schema";
-import { scheduleBackup } from "./backup";
 
 const client = axios.create({
   baseURL: config.oploverz.baseUrl,
@@ -91,7 +89,6 @@ const transformToOploverzSlug = (parsedSlug: any): string | null => {
 
 
 export const getOploverzEpisodeStream = async (samehadakuSlug: string) => {
-  // The new, more intelligent transformation process
   const parsed = parseSamehadakuSlug(samehadakuSlug);
   const oploverzSlug = transformToOploverzSlug(parsed);
 
@@ -100,28 +97,14 @@ export const getOploverzEpisodeStream = async (samehadakuSlug: string) => {
       return null;
   }
 
-  // 1. Check cache first
-  const cachedEmbeds = db.query(
-    `SELECT server_name, url FROM embeds WHERE episode_slug = ?`
-  ).all(oploverzSlug) as { server_name: string; url: string }[];
-
-  if (cachedEmbeds.length > 0) {
-    console.log(`[Cache HIT] Serving Oploverz embeds for ${oploverzSlug} from database.`);
-    const episodeDetails = db.query(`SELECT episode_title as title FROM episodes WHERE episode_slug = ?`).get(oploverzSlug) as any;
-    return {
-        title: episodeDetails?.title || oploverzSlug,
-        streams: cachedEmbeds.map(e => ({ server: e.server_name, url: e.url }))
-    }
-  }
-
-  const fullUrl = new URL(oploverzSlug, config.oploverz.baseUrl).href;
-  console.log(`[Oploverz] Attempting to scrape URL: ${fullUrl}`); 
+  const sourceUrl = new URL(oploverzSlug, config.oploverz.baseUrl).href;
+  console.log(`[Oploverz] Scraping for episode streams: ${sourceUrl}`); 
 
   try {
     const { data } = await client.get(oploverzSlug);
     const $ = load(data);
 
-    const streams: { server: string; url: string }[] = [];
+    const streams: { server: string; embed_url: string | null }[] = [];
     
     $('select.mirror option').each((_, el) => {
         const serverName = $(el).text().trim();
@@ -131,39 +114,27 @@ export const getOploverzEpisodeStream = async (samehadakuSlug: string) => {
             try {
                 const decodedIframe = Buffer.from(base64Iframe, 'base64').toString('utf-8');
                 const iframe$ = load(decodedIframe);
-                const url = iframe$('iframe').attr('src');
-                if (url) {
-                    // Insert into DB for caching
-                    db.query(
-                        `INSERT INTO embeds (episode_slug, server_name, url) VALUES (?, ?, ?)`
-                    ).run(oploverzSlug, serverName, url);
-                    streams.push({ server: serverName, url });
+                const embedUrl = iframe$('iframe').attr('src');
+                if (embedUrl) {
+                    streams.push({ server: serverName, embed_url: embedUrl });
                 }
             } catch (e) {
-                console.error(`[Oploverz] Failed to decode or parse iframe for server: ${serverName}`, e);
+                // ignore
             }
         }
     });
 
     const title = $("h1.entry-title").text().trim();
 
-    if (streams.length > 0) {
-        scheduleBackup();
-    }
-
-    console.log(`[Oploverz] Successfully scraped. Found ${streams.length} streams.`);
-    console.log('[Oploverz] Streams:', streams);
-
     return {
       title: title || oploverzSlug,
       streams,
     };
   } catch (error) {
-    // It's common for a guessed slug to result in a 404, so we can log this less severely.
     if (axios.isAxiosError(error) && error.response?.status === 404) {
         console.log(`[Oploverz] 404 Not Found for slug: ${oploverzSlug}`);
     } else {
-        console.error(`[Oploverz] Failed to scrape ${fullUrl}:`, error);
+        console.error(`[Oploverz] Failed to scrape ${sourceUrl}:`, error);
     }
     return null;
   }
