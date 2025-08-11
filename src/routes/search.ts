@@ -1,7 +1,6 @@
-
 import { Elysia, t } from "elysia";
 import Fuse from 'fuse.js';
-import { getAnimeByGenre } from "../lib/scraper";
+import { getAnimeByGenre } from "../lib/samehadaku_scraper";
 
 export const searchRoutes = new Elysia({ prefix: "/search" })
   .get("/", async ({ query }) => {

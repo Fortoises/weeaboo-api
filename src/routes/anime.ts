@@ -1,6 +1,7 @@
 import { Elysia, t } from "elysia";
-import { getAnime, getEpisodeStream } from "../lib/scraper";
+import { getAnime, getEpisodeStream } from "../lib/samehadaku_scraper";
 import { db } from "../db/schema";
+import { getOploverzEpisodeStream } from "../lib/oploverz_scraper";
 
 export const animeRoutes = new Elysia({ prefix: "/anime" })
   .get("/:slug", async ({ params }) => {
@@ -15,16 +16,36 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
 
     return getAnime(params.slug);
   })
-  .get("/:slug/episode/:episode_slug", async ({ params }) => {
-    const manualEmbeds = db.query(`SELECT server_name, url FROM embeds WHERE episode_slug = ?`).all(params.episode_slug);
+  .get("/:slug/episode/:episode_slug", async ({ params, set }) => {
+    const [samehadakuResult, oploverzResult] = await Promise.all([
+        getEpisodeStream(params.episode_slug),
+        getOploverzEpisodeStream(params.episode_slug)
+    ]);
 
-    if (manualEmbeds.length > 0) {
-        const episodeDetails = db.query(`SELECT episode_title as title FROM episodes WHERE episode_slug = ?`).get(params.episode_slug) as any;
-        return {
-            title: episodeDetails?.title || params.episode_slug,
-            streams: manualEmbeds.map(e => ({ server: e.server_name, url: e.url }))
-        }
+    let allStreams: { server: string; url: string | null; }[] = [];
+
+    if (samehadakuResult && samehadakuResult.streams) {
+        allStreams.push(...samehadakuResult.streams);
+    }
+    if (oploverzResult && oploverzResult.streams) {
+        allStreams.push(...oploverzResult.streams);
     }
 
-    return getEpisodeStream(params.episode_slug);
+    // Deduplicate streams based on the URL to ensure uniqueness
+    const uniqueStreams = allStreams.filter((stream, index, self) =>
+        stream.url && index === self.findIndex((s) => s.url === stream.url)
+    );
+
+    if (uniqueStreams.length === 0) {
+        set.status = 404;
+        return { message: "Episode not found on any provider." };
+    }
+
+    // Prioritize title from Samehadaku, then Oploverz, then the slug itself
+    const title = samehadakuResult?.title || oploverzResult?.title || params.episode_slug;
+
+    return {
+        title,
+        streams: uniqueStreams
+    };
   });

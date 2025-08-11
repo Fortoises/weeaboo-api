@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { getLatestUpdate } from "../lib/scraper";
+import { getLatestUpdate } from "../lib/samehadaku_scraper";
 
 const animeInfoSchema = t.Object({
   title: t.String(),

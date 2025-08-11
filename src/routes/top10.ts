@@ -1,6 +1,5 @@
-
 import { Elysia, t } from "elysia";
-import { getTop10Anime } from "../lib/scraper";
+import { getTop10Anime } from "../lib/samehadaku_scraper";
 
 export const top10Routes = new Elysia({ prefix: "/top10" })
   .get("/", async () => {
