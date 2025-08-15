@@ -15,21 +15,25 @@ import { genreRoutes } from "./routes/genre";
 import { adminRoutes } from "./routes/admin";
 import { searchRoutes } from "./routes/search";
 import { top10Routes } from "./routes/top10";
+import { streamRoutes } from "./routes/stream";
 
 const app = new Elysia()
   // --- Hooks ---
-  .onBeforeHandle(({ request }) => {
+  .onBeforeHandle(({ request, set }) => {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/docs')) {
       return;
     }
 
-    const apiKey = request.headers.get("x-api-key");
-    if (apiKey !== process.env.API_KEY) {
-        return new Response(JSON.stringify({ message: "Unauthorized: Invalid or missing API Key" }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json' },
-        });
+    // Allow disabling API key check for development
+    const apiKeyEnabled = process.env.ENABLE_API_KEY !== 'false';
+
+    if (apiKeyEnabled) {
+        const apiKey = request.headers.get("x-api-key");
+        if (apiKey !== process.env.API_KEY) {
+            set.status = 401;
+            return { message: "Unauthorized: Invalid or missing API Key" };
+        }
     }
   })
   // --- Plugins ---
@@ -80,6 +84,7 @@ const app = new Elysia()
   .use(adminRoutes)
   .use(searchRoutes)
   .use(top10Routes)
+  .use(streamRoutes)
   .listen({ port: 3000, idleTimeout: 30 });
 
 console.log(

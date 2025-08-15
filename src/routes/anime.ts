@@ -2,8 +2,34 @@ import { Elysia, t } from "elysia";
 import { getAnime, getEpisodeStream } from "../lib/samehadaku_scraper";
 import { db } from "../db/schema";
 import { getOploverzEpisodeStream } from "../lib/oploverz_scraper";
-import { resolveStreamUrl, isCacheableHost } from "../lib/resolver";
 import { scheduleBackup } from "../lib/backup";
+
+function parseServerString(server: string, embedUrl: string): { provider: string | null, quality: string } {
+    if (!server) return { provider: null, quality: "default" };
+
+    let provider: string | null = null;
+    const lowerEmbedUrl = embedUrl.toLowerCase();
+
+    if (lowerEmbedUrl.includes('blogger.com') || lowerEmbedUrl.includes('blogspot.com')) {
+        provider = 'blogger';
+    } else if (lowerEmbedUrl.includes('filedon.co')) {
+        provider = 'filedon';
+    } else if (lowerEmbedUrl.includes('pixeldrain.com')) {
+        provider = 'pixeldrain';
+    } else if (lowerEmbedUrl.includes('mega.nz')) {
+        provider = 'mega';
+    } else if (lowerEmbedUrl.includes('wibufile.com')) {
+        provider = 'wibufile';
+    }
+
+    let quality: string = 'default';
+    const qualityMatch = server.match(/(1080p|720p|480p|360p)/i);
+    if (qualityMatch) {
+        quality = qualityMatch[0].toLowerCase();
+    }
+
+    return { provider, quality };
+}
 
 export const animeRoutes = new Elysia({ prefix: "/anime" })
   .get("/:slug", async ({ params }) => {
@@ -18,96 +44,90 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
 
     return getAnime(params.slug);
   })
-  .get("/:slug/episode/:episode_slug", async ({ params, set, request }) => {
+  .get("/:slug/episode/:episode_slug", async ({ params, set }) => {
     const slug = params.episode_slug;
+    let title = slug;
 
-    // Step 1: Get all cached streams from the database.
-    const cachedStreams = db.query(
-        `SELECT server_name, embed_url, direct_url FROM streams WHERE episode_slug = ?`
-    ).all(slug) as { server_name: string; embed_url: string; direct_url: string | null }[];
+    // Step 1: Try to get streams from the database first.
+    let streamsFromDb = db.query(
+        `SELECT server_name, embed_url, provider, quality FROM streams WHERE episode_slug = ?`
+    ).all(slug) as { server_name: string; embed_url: string; provider: string | null; quality: string | null }[];
 
-    // Step 2: Scrape for a fresh list of streams from all providers.
-    const [samehadakuResult, oploverzResult] = await Promise.all([
-        getEpisodeStream(slug),
-        getOploverzEpisodeStream(slug)
-    ]);
+    // Step 2: If DB is empty, scrape from sources.
+    if (streamsFromDb.length === 0) {
+        console.log(`[Cache] No streams found in DB for ${slug}. Scraping...`);
+        const [samehadakuResult, oploverzResult] = await Promise.all([
+            getEpisodeStream(slug),
+            getOploverzEpisodeStream(slug)
+        ]);
 
-    const freshStreams: any[] = [];
-    if (samehadakuResult?.streams) freshStreams.push(...samehadakuResult.streams);
-    if (oploverzResult?.streams) freshStreams.push(...oploverzResult.streams);
+        const freshStreams: any[] = [];
+        if (samehadakuResult?.streams) freshStreams.push(...samehadakuResult.streams);
+        if (oploverzResult?.streams) freshStreams.push(...oploverzResult.streams);
+        
+        if (samehadakuResult?.title) title = samehadakuResult.title;
+        else if (oploverzResult?.title) title = oploverzResult.title;
 
-    // Step 3: Combine and process the lists.
-    const finalStreamList: any[] = [];
-    const processedEmbedUrls = new Set();
-    let hasNewCachedContent = false;
-
-    // First, process the fresh streams from the scrape.
-    for (const freshStream of freshStreams) {
-        if (!freshStream.embed_url || processedEmbedUrls.has(freshStream.embed_url)) {
-            continue; // Skip duplicates
+        if (freshStreams.length > 0) {
+            const insertStmt = db.prepare(
+                `INSERT OR IGNORE INTO streams (episode_slug, server_name, embed_url, provider, quality) VALUES (?, ?, ?, ?, ?)`
+            );
+            db.transaction(() => {
+                for (const stream of freshStreams) {
+                    const { provider, quality } = parseServerString(stream.server, stream.embed_url);
+                    insertStmt.run(slug, stream.server, stream.embed_url, provider, quality);
+                }
+            })();
+            scheduleBackup();
+            console.log(`[Cache] Saved ${freshStreams.length} new streams to DB for ${slug}.`);
+            
+            streamsFromDb = db.query(
+                `SELECT server_name, embed_url, provider, quality FROM streams WHERE episode_slug = ?`
+            ).all(slug) as any;
         }
-
-        const cacheable = isCacheableHost(freshStream.embed_url);
-        const existingCachedStream = cachedStreams.find(cs => cs.embed_url === freshStream.embed_url);
-
-        if (existingCachedStream) {
-            // If it exists in cache, add it to the final list.
-            finalStreamList.push(existingCachedStream);
-        } else {
-            // If it's new, add it to the final list.
-            finalStreamList.push({ ...freshStream, direct_url: null }); // Add with null direct_url for now
-            // And if it's cacheable, save it to the DB.
-            if (cacheable) {
-                db.query(
-                    `INSERT INTO streams (episode_slug, server_name, embed_url) VALUES (?, ?, ?)`
-                ).run(slug, freshStream.server, freshStream.embed_url);
-                hasNewCachedContent = true;
-            }
-        }
-        processedEmbedUrls.add(freshStream.embed_url);
+    } else {
+        console.log(`[Cache] Found ${streamsFromDb.length} streams in DB for ${slug}.`);
     }
 
-    if (hasNewCachedContent) {
-        scheduleBackup();
-    }
-
-    if (finalStreamList.length === 0) {
+    if (streamsFromDb.length === 0) {
         set.status = 404;
         return { message: "Episode not found on any provider." };
     }
 
-    // Step 4: Resolve direct URLs.
-    const clientIp = request.headers.get('x-forwarded-for');
-    const resolutionPromises = finalStreamList.map(async (stream) => {
-        const cacheable = isCacheableHost(stream.embed_url);
-
-        // If it's cacheable and we have a direct_url, use it.
-        if (cacheable && stream.direct_url) {
-            return stream;
-        }
-
-        // Otherwise, resolve it in real-time.
-        const resolvedUrl = await resolveStreamUrl(stream.embed_url, request.headers, clientIp || undefined);
-
-        // If resolution is successful and the host is cacheable, update the DB.
-        if (resolvedUrl && cacheable) {
-            db.query(
-                `UPDATE streams SET direct_url = ? WHERE embed_url = ?`
-            ).run(resolvedUrl, stream.embed_url);
-        }
-        
-        return { ...stream, direct_url: resolvedUrl };
-    });
-
-    const resolvedStreams = await Promise.all(resolutionPromises);
-    const title = samehadakuResult?.title || oploverzResult?.title || slug;
-
+    // Step 3: Format the final response.
     return {
         title,
-        streams: resolvedStreams.map(s => ({
-            server: s.server_name || s.server,
-            embed_url: s.embed_url,
-            direct_url: s.direct_url
-        }))
+        streams: streamsFromDb.map(s => {
+            const streamUrl = s.provider && s.quality
+                ? `/anime/stream/${slug}.mp4?provider=${s.provider}&quality=${s.quality}`
+                : null;
+
+            return {
+                server: s.server_name,
+                provider: s.provider,
+                quality: s.quality,
+                embed_url: s.embed_url,
+                stream_url: streamUrl
+            }
+        })
     };
+  }, {
+    detail: {
+        summary: "Get Episode Streams",
+        description: "Returns a list of available streams for a specific episode. It uses a cache-first strategy. If streams are not in the database, it will scrape them and store them for future requests.",
+        tags: ["Anime"],
+    },
+    response: {
+        200: t.Object({
+            title: t.String(),
+            streams: t.Array(t.Object({
+                server: t.String(),
+                provider: t.Nullable(t.String()),
+                quality: t.Nullable(t.String()),
+                embed_url: t.String(),
+                stream_url: t.Nullable(t.String()),
+            }))
+        }),
+        404: t.Object({ message: t.String() })
+    }
   });

@@ -2,12 +2,6 @@ import { Database } from "bun:sqlite";
 
 export const db = new Database("weeaboo.sqlite");
 
-// Drop the old table if it exists to ensure a clean slate.
-// This is for development and assumes that losing old embed data is acceptable during this refactor.
-try {
-    db.exec("DROP TABLE IF EXISTS embeds;");
-} catch {}
-
 const schema = `
     CREATE TABLE IF NOT EXISTS animes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,8 +30,9 @@ const schema = `
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       episode_slug TEXT NOT NULL,
       server_name TEXT NOT NULL,
-      embed_url TEXT NOT NULL,
-      direct_url TEXT, -- This can be null if not resolved or for hosts like Blogger/Wibu
+      embed_url TEXT NOT NULL UNIQUE,
+      provider TEXT,
+      quality TEXT,
       FOREIGN KEY (episode_slug) REFERENCES episodes(episode_slug) ON DELETE CASCADE
     );
 
@@ -69,4 +64,4 @@ const schema = `
 
 db.exec(schema);
 
-console.log("Database schema verified.");
+console.log("Database schema verified and updated.");

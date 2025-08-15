@@ -26,6 +26,7 @@ const animeNameMap: { [key: string]: string } = {
  * @returns An object containing the anime part, season number, and episode number.
  */
 const parseSamehadakuSlug = (slug: string) => {
+    if (!slug) return null;
     // Regex to capture the main anime title part, optional season, and episode number.
     // It looks for "-episode-" as a primary separator. Using a non-greedy (.*?) match.
     const match = slug.match(/^(.*?)(-season-\d+)?-episode-(\d+)$/);

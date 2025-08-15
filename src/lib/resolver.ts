@@ -2,12 +2,7 @@ import axios from "axios";
 import { load } from "cheerio";
 import config from "../../config.json";
 
-// --- Helper Function ---
-export const isCacheableHost = (embedUrl: string) => {
-    // Links from these hosts are temporary or require special handling, so they shouldn't be cached.
-    const nonCacheableHosts = ['api.wibufile.com', 'blogger.com', 'googlevideo.com'];
-    return !nonCacheableHosts.some(host => embedUrl.includes(host));
-}
+
 
 // --- Blogger Resolver ---
 async function resolveBlogger(url: string, headers: any, ip: string | undefined): Promise<string | null> {
@@ -38,26 +33,32 @@ async function resolveWibufile(url: string, headers: any): Promise<string | null
         return url;
     }
 
-    // This resolver returns the intermediate API URL. 
-    // The client MUST call this URL to get the final .mp4 link.
     try {
         const { data: pageHtml } = await axios.get(url, {
             headers: {
-                'Referer': config.samehadaku.baseUrl,
+                'Referer': config.samehadaku.baseUrl, // Or any valid referer
                 'User-Agent': headers['user-agent'],
             }
         });
-        
-        const ajaxUrlMatch = pageHtml.match(/"(\/\/api.wibufile.com\/api\/\?.*?)"/);
-        if (!ajaxUrlMatch || !ajaxUrlMatch[1]) {
-            console.log(`[Resolver] Could not find Wibufile AJAX URL on page: ${url}`);
+
+        const jwpConfigMatch = pageHtml.match(/sources: \[(.*?)\]/);
+        if (!jwpConfigMatch || !jwpConfigMatch[1]) {
+            console.log(`[Resolver] Could not find jwplayer config on page: ${url}`);
             return null;
         }
-        
-        return `https:${ajaxUrlMatch[1]}`;
+
+        const sourceConfig = JSON.parse(jwpConfigMatch[1].replace(/\\/g, ''));
+        const fileUrl = sourceConfig.file;
+
+        if (fileUrl) {
+            return fileUrl;
+        }
+
+        console.log(`[Resolver] Could not extract file URL from jwplayer config: ${url}`);
+        return null;
 
     } catch (error) {
-        console.error(`[Resolver] Failed to resolve Wibufile URL: ${url}`);
+        console.error(`[Resolver] Failed to resolve Wibufile URL: ${url}`, error);
         return null;
     }
 }
