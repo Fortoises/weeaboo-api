@@ -49,6 +49,7 @@ const schema = `
       season TEXT,
       studio TEXT,
       producers TEXT,
+      latest_episode TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );

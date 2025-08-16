@@ -6,13 +6,14 @@ const homeAnimeSchema = t.Object({
   cover: t.Union([t.String(), t.Null()]),
   rating: t.Union([t.String(), t.Null()]),
   videoID: t.String(),
+  latest_episode: t.Union([t.String(), t.Null()]),
 });
 
 export const homeRoutes = new Elysia({ prefix: "/home" }).get(
   "/",
   () => {
     const query = db.query(
-      "SELECT title, thumbnail as cover, rating, slug as videoID FROM home_anime ORDER BY updated_at DESC LIMIT 20"
+      "SELECT title, thumbnail as cover, rating, slug as videoID, latest_episode FROM home_anime ORDER BY updated_at DESC LIMIT 20"
     );
     return query.all();
   },

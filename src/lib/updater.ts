@@ -14,7 +14,7 @@ const updateHomeAnime = async () => {
   }
 
   const upsertStmt = db.prepare(
-    'INSERT INTO home_anime (slug, title, thumbnail, synopsis, rating, status, type, source, season, studio, producers, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(slug) DO UPDATE SET updated_at = CURRENT_TIMESTAMP'
+    'INSERT INTO home_anime (slug, title, thumbnail, synopsis, rating, status, type, source, season, studio, producers, latest_episode, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(slug) DO UPDATE SET updated_at = CURRENT_TIMESTAMP, latest_episode = excluded.latest_episode'
   );
 
   for (const anime of homeAnime) {
@@ -30,7 +30,8 @@ const updateHomeAnime = async () => {
             anime.source,
             anime.season,
             anime.studio,
-            anime.producers
+            anime.producers,
+            anime.latest_episode
         );
     }
   }

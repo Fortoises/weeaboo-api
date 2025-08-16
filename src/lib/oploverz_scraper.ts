@@ -7,7 +7,7 @@ const client = axios.create({
   headers: {
     "User-Agent": "Mozilla/5.0 (Windows NT)",
   },
-  timeout: 20000, // 20 second timeout
+  timeout: 45000, // 45 second timeout
 });
 
 /**

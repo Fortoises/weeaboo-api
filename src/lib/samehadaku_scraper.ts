@@ -4,7 +4,6 @@ import { db } from "../db/schema";
 import { scheduleBackup } from "./backup";
 import config from "../../config.json";
 import { SimpleCache } from "./cache";
-import { isCacheableHost } from "./resolver";
 
 // --- Cache Instances ---
 // Cache for 5 minutes
@@ -254,59 +253,79 @@ export const getTop10Anime = async () => {
 };
 
 export const getHomeAnime = async () => {
-  const { data } = await client.get("/");
-  const $ = load(data);
-  const list = $("div.post-show ul li");
+  console.log("[Scraper] Starting to scrape latest anime from 5 pages...");
+  const pageUrls = Array.from({ length: 5 }, (_, i) => `anime-terbaru/page/${i + 1}/`);
 
-  const promises = list
-    .map((_, el) => {
-      const element = $(el);
-      const animeID = new URL(element.find("h2.entry-title a").attr("href")!)
-        .pathname;
+  try {
+    // Step 1: Get all anime slugs from the 5 pages
+    const pagePromises = pageUrls.map(url => client.get(url));
+    const pageResponses = await Promise.all(pagePromises);
 
-      if (animeID) {
-        return (async () => {
-          try {
-            const detailResponse = await client.get(animeID.startsWith('/') ? animeID.substring(1) : animeID);
-            const detail$ = load(detailResponse.data);
+    const animeSlugs = new Set<string>();
+    for (const response of pageResponses) {
+      const $ = load(response.data);
+      $("div.post-show ul li").each((_, el) => {
+        const href = $(el).find("h2.entry-title a").attr("href");
+        if (href) {
+          const slug = new URL(href).pathname;
+          animeSlugs.add(slug);
+        }
+      });
+    }
 
-            const title = detail$(".infoanime .entry-title").text().trim().replace("Nonton Anime ", "");
-            const thumbnail = detail$("div.thumb img.anmsa").attr("src");
-            const rating = parseRating(detail$("div.rtg").text().trim());
-            const synopsis = detail$("div.infox .desc p").text().trim();
+    console.log(`[Scraper] Found ${animeSlugs.size} unique anime slugs. Fetching details...`);
 
-            const details: { [key: string]: string } = {};
-            detail$("div.spe > span").each((_, el) => {
-              const element = detail$(el);
-              const key = element.find("b").text().replace(":", "").trim().toLowerCase();
-              const value = element.text().replace(element.find("b").text(), "").trim();
-              if (key && value) {
-                details[key] = value;
-              }
-            });
+    // Step 2: Get details for each unique anime slug
+    const detailPromises = Array.from(animeSlugs).map(slug => {
+      return (async () => {
+        try {
+          const detailResponse = await client.get(slug);
+          const detail$ = load(detailResponse.data);
 
-            return {
-              slug: animeID.replace('/anime/', '').replace('/', ''),
-              title,
-              thumbnail,
-              rating,
-              synopsis,
-              status: details["status"],
-              type: details["type"],
-              source: details["source"],
-              season: details["season"],
-              studio: details["studio"],
-              producers: details["producers"],
-            };
-          } catch (error) {
-            return null;
-          }
-        })();
-      }
-      return null;
-    })
-    .get();
+          const title = detail$(".infoanime .entry-title").text().trim().replace("Nonton Anime ", "");
+          const thumbnail = detail$("div.thumb img.anmsa").attr("src");
+          const rating = parseRating(detail$("div.rtg").text().trim());
+          const synopsis = detail$("div.infox .desc p").text().trim();
+          const latest_episode = detail$(".lstepsiode .eps a").first().text().trim() || null;
 
-  const results = await Promise.all(promises);
-  return results.filter((el) => el !== null);
+          const details: { [key: string]: string } = {};
+          detail$("div.spe > span").each((_, el) => {
+            const element = detail$(el);
+            const key = element.find("b").text().replace(":", "").trim().toLowerCase();
+            const value = element.text().replace(element.find("b").text(), "").trim();
+            if (key && value) {
+              details[key] = value;
+            }
+          });
+
+          return {
+            slug: slug.replace(/\/anime\/|\//g, ""),
+            title,
+            thumbnail,
+            rating,
+            synopsis,
+            status: details["status"],
+            type: details["type"],
+            source: details["source"],
+            season: details["season"],
+            studio: details["studio"],
+            producers: details["producers"],
+            latest_episode,
+          };
+        } catch (error) {
+          console.error(`[Scraper] Failed to fetch detail for slug: ${slug}`, error);
+          return null;
+        }
+      })();
+    });
+
+    const results = await Promise.all(detailPromises);
+    const validResults = results.filter(r => r !== null);
+    console.log(`[Scraper] Successfully fetched details for ${validResults.length} anime.`);
+    return validResults;
+
+  } catch (error) {
+    console.error("[Scraper] Failed to scrape home anime pages:", error);
+    return []; // Return empty array on failure
+  }
 };
