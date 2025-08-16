@@ -4,8 +4,11 @@ import { resolveStreamUrl } from "../lib/resolver";
 import axios from "axios";
 
 export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
-  .get("/*", async ({ params, query, set, request }) => {
-    const slugepisode = params['*'].replace('.mp4', '');
+  .get("/:slugepisode.mp4", async ({ params, query, set, request }) => {
+    // Elysia captures params with dots literally. We access it and remove the extension.
+    const slugepisodeWithExt = params['slugepisode.mp4'];
+    const slugepisode = slugepisodeWithExt.replace('.mp4', '');
+    
     const { quality, provider } = query;
 
     if (!slugepisode || !provider || !quality) {
@@ -15,7 +18,6 @@ export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
 
     console.log(`[Stream] Request for ${slugepisode} - Provider: ${provider}, Quality: ${quality}`);
 
-    // Step 1: Find all matching streams in the database.
     const matchingStreams = db.query(
         `SELECT embed_url FROM streams WHERE episode_slug = ? AND provider = ? AND quality = ?`
     ).all(slugepisode, provider, quality) as { embed_url: string }[];
@@ -27,7 +29,6 @@ export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
 
     console.log(`[Stream] Found ${matchingStreams.length} matching stream(s) in DB. Attempting to resolve...`);
 
-    // Step 2: Iterate and try to resolve each stream until one succeeds.
     for (const streamToTry of matchingStreams) {
         console.log(`[Stream] Attempting to resolve: ${streamToTry.embed_url}`);
         const clientIp = request.headers.get('x-forwarded-for');
@@ -35,7 +36,6 @@ export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
 
         if (directUrl) {
             console.log(`[Stream] Resolved to: ${directUrl}. Starting video stream proxy.`);
-            // Step 3: If successful, proxy the video stream.
             try {
                 const response = await axios.get(directUrl, { 
                     responseType: 'stream', 
@@ -66,12 +66,10 @@ export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
                 return new Response(videoStream, { headers });
             } catch (error) {
                 console.error(`[Stream] Proxy failed for resolved URL: ${directUrl}. Trying next link.`, error);
-                // If proxying fails, we continue to the next loop iteration.
             }
         }
     }
 
-    // Step 4: If the loop completes without returning, no links worked.
     set.status = 502;
     console.error(`[Stream] All found stream links failed to resolve or proxy for ${slugepisode}.`);
     return { message: "Could not resolve or stream from any of the available sources." };
@@ -82,7 +80,7 @@ export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
         provider: t.Optional(t.String({ description: "Example: 'blogger', 'filedon'" }))
     }),
     params: t.Object({
-        '*': t.String({ description: "The episode slug ending with .mp4, e.g., 'one-piece-episode-1.mp4'" })
+        'slugepisode.mp4': t.String({ description: "The episode slug ending with .mp4, e.g., 'one-piece-episode-1.mp4'" })
     }),
     detail: {
         summary: "Proxy Video Stream",
