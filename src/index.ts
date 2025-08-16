@@ -5,6 +5,7 @@ import {
   swagger,
 } from "@elysiajs/swagger";
 import { config } from "dotenv";
+import { cors } from "@elysiajs/cors";
 
 // Load environment variables
 config();
@@ -18,6 +19,7 @@ import { top10Routes } from "./routes/top10";
 import { streamRoutes } from "./routes/stream";
 
 const app = new Elysia()
+  .use(cors())
   // --- Hooks ---
   .onBeforeHandle(({ request, set }) => {
     const url = new URL(request.url);
