@@ -6,9 +6,26 @@ import {
 } from "@elysiajs/swagger";
 import { config } from "dotenv";
 import { cors } from "@elysiajs/cors";
+import cron from 'node-cron';
+import { updateHomeAnime, updateTop10Anime } from "./lib/updater";
 
 // Load environment variables
 config();
+
+// Initial data update on startup
+updateHomeAnime();
+updateTop10Anime();
+
+// Schedule tasks
+cron.schedule('0 * * * *', () => {
+  console.log('Running scheduled home anime update every hour...');
+  updateHomeAnime();
+});
+
+cron.schedule('0 15 * * 1', () => {
+  console.log('Running scheduled top 10 anime update on Monday at 15:00...');
+  updateTop10Anime();
+});
 
 import { animeRoutes } from "./routes/anime";
 import { homeRoutes } from "./routes/home";

@@ -62,16 +62,12 @@ API Scrapper Anime yang dibangun dengan Bun dan Elysia.js. Dilengkapi dengan sis
     ```
 
 4.  **Menjalankan Aplikasi:**
-    -   **Terminal 1: Jalankan API Utama**
-        ```bash
-        bun run dev # Untuk development
-        # bun run start # Untuk produksi
-        ```
-
-    -   **Terminal 2: Jalankan Proses Updater**
-        ```bash
-        bun run update
-        ```
+    ```bash
+    bun run dev # Untuk development
+    # bun run start # Untuk produksi
+    ```
+    
+    Server akan secara otomatis menangani pembaruan data di latar belakang.
 
 ## Alur Kerja API
 
