@@ -12,7 +12,8 @@ const genreCache = new SimpleCache<any>(300);
 const latestUpdateCache = new SimpleCache<any>(300);
 const top10Cache = new SimpleCache<any>(300);
 
-const client = axios.create({
+// Helper to create a fresh axios instance for each operation
+const createApiClient = () => axios.create({
   baseURL: config.samehadaku.baseUrl,
   headers: {
     "User-Agent": "Mozilla/5.0 (Windows NT)",
@@ -30,6 +31,7 @@ export const getLatestUpdate = async () => {
   const cachedData = latestUpdateCache.get('latest');
   if (cachedData) return cachedData;
 
+  const client = createApiClient();
   const { data } = await client.get("anime-terbaru/");
   const $ = load(data);
   const list = $("div.post-show ul li");
@@ -74,6 +76,7 @@ export const getAnime = async (id: string) => {
   const cachedData = animeCache.get(id);
   if (cachedData) return cachedData;
 
+  const client = createApiClient();
   const { data } = await client.get(`anime/${id}`);
   const $ = load(data);
 
@@ -128,6 +131,7 @@ export const getAnimeByGenre = async (genre: string) => {
   const cachedData = genreCache.get(genre);
   if (cachedData) return cachedData;
 
+  const client = createApiClient();
   const { data } = await client.get(`genre/${genre}/`);
   const $ = load(data);
 
@@ -165,6 +169,7 @@ export const getAnimeByGenre = async (genre: string) => {
 };
 
 export const getServerList = async (videoID: string) => {
+  const client = createApiClient();
   const { data } = await client.get(videoID);
   const $ = load(data);
   const resources: any[] = [];
@@ -181,6 +186,7 @@ export const getServerList = async (videoID: string) => {
 };
 
 export const getStreamResource = ({ name: _, ...resource }: any) => {
+  const client = createApiClient();
   const form = new FormData();
   form.append("action", "player_ajax");
   for (const key of Object.keys(resource)) {
@@ -198,10 +204,12 @@ export const getEpisodeStream = async (episodeSlug: string) => {
 
   try {
     const servers = await getServerList(episodeSlug);
+    console.log(`[Samehadaku] Found servers for ${episodeSlug}:`, servers);
     if (!servers || servers.length === 0) {
       return { title: "", streams: [] };
     }
 
+    const client = createApiClient();
     const { data } = await client.get(episodeSlug);
     const $ = load(data);
     const title = $("h1.entry-title").text().trim();
@@ -232,6 +240,7 @@ export const getTop10Anime = async () => {
   const cachedData = top10Cache.get('top10');
   if (cachedData) return cachedData;
 
+  const client = createApiClient();
   const { data } = await client.get("/");
   const $ = load(data);
   const animeList: any[] = [];
@@ -254,15 +263,21 @@ export const getTop10Anime = async () => {
 
 export const getHomeAnime = async () => {
   console.log("[Scraper] Starting to scrape latest anime from 5 pages...");
+  const client = createApiClient();
   const pageUrls = Array.from({ length: 5 }, (_, i) => `anime-terbaru/page/${i + 1}/`);
 
   try {
     // Step 1: Get all anime slugs from the 5 pages
-    const pagePromises = pageUrls.map(url => client.get(url));
+    console.log("[Scraper] Fetching page URLs...");
+    const pagePromises = pageUrls.map(url => client.get(url).catch(e => { 
+      console.error(`[Scraper] Failed to fetch page: ${url}`, e.message);
+      return null; // Return null on error
+    }));
     const pageResponses = await Promise.all(pagePromises);
 
     const animeSlugs = new Set<string>();
     for (const response of pageResponses) {
+      if (!response) continue; // Skip failed requests
       const $ = load(response.data);
       $("div.post-show ul li").each((_, el) => {
         const href = $(el).find("h2.entry-title a").attr("href");
@@ -273,12 +288,18 @@ export const getHomeAnime = async () => {
       });
     }
 
+    if (animeSlugs.size === 0) {
+      console.error("[Scraper] No anime slugs found. Scraping might be blocked or the website structure has changed.");
+      return [];
+    }
+
     console.log(`[Scraper] Found ${animeSlugs.size} unique anime slugs. Fetching details...`);
 
     // Step 2: Get details for each unique anime slug
     const detailPromises = Array.from(animeSlugs).map(slug => {
       return (async () => {
         try {
+          console.log(`[Scraper] Fetching detail for slug: ${slug}`);
           const detailResponse = await client.get(slug);
           const detail$ = load(detailResponse.data);
 
@@ -312,20 +333,21 @@ export const getHomeAnime = async () => {
             producers: details["producers"],
             latest_episode,
           };
-        } catch (error) {
-          console.error(`[Scraper] Failed to fetch detail for slug: ${slug}`, error);
+        } catch (error: any) {
+          console.error(`[Scraper] Failed to fetch detail for slug: ${slug}. Error: ${error.message}`);
           return null;
         }
       })();
     });
 
+    console.log("[Scraper] Waiting for all detail promises to resolve...");
     const results = await Promise.all(detailPromises);
     const validResults = results.filter(r => r !== null);
-    console.log(`[Scraper] Successfully fetched details for ${validResults.length} anime.`);
+    console.log(`[Scraper] Successfully fetched details for ${validResults.length} out of ${animeSlugs.size} anime.`);
     return validResults;
 
-  } catch (error) {
-    console.error("[Scraper] Failed to scrape home anime pages:", error);
+  } catch (error: any) {
+    console.error(`[Scraper] A critical error occurred during the home anime scraping process: ${error.message}`);
     return []; // Return empty array on failure
   }
 };
