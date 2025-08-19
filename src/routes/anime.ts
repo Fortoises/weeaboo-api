@@ -99,7 +99,7 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
         title,
         streams: streamsFromDb.map(s => {
             const streamUrl = s.provider && s.quality
-                ? `/anime/stream/${slug}.mp4?provider=${s.provider}&quality=${s.quality}`
+                ? `/anime/stream/${slug}?provider=${s.provider}&quality=${s.quality}`
                 : null;
 
             return {

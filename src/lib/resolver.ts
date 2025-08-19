@@ -2,8 +2,6 @@ import axios from "axios";
 import { load } from "cheerio";
 import config from "../../config.json";
 
-
-
 // --- Blogger Resolver ---
 async function resolveBlogger(url: string, headers: any, ip: string | undefined): Promise<string | null> {
   try {
@@ -18,7 +16,14 @@ async function resolveBlogger(url: string, headers: any, ip: string | undefined)
     if (!match || !match[1]) return null;
 
     const configJson = JSON.parse(match[1]);
-    // Find the highest quality stream
+    
+    // Prioritize HLS stream if available
+    const hlsStream = configJson.streams.find((s: any) => s.play_url && s.play_url.includes('.m3u8'));
+    if (hlsStream) {
+        return hlsStream.play_url;
+    }
+
+    // Fallback to the highest quality stream
     const stream = configJson.streams.sort((a: any, b: any) => b.height - a.height)[0];
     return stream ? stream.play_url : null;
   } catch (error) {
@@ -29,7 +34,7 @@ async function resolveBlogger(url: string, headers: any, ip: string | undefined)
 
 // --- Wibufile Resolver (Hybrid Approach - Final) ---
 async function resolveWibufile(url: string, headers: any): Promise<string | null> {
-    if (url.includes('.mp4')) {
+    if (url.includes('.m3u8') || url.includes('.mp4')) {
         return url;
     }
 
@@ -41,17 +46,25 @@ async function resolveWibufile(url: string, headers: any): Promise<string | null
             }
         });
 
-        const jwpConfigMatch = pageHtml.match(/sources: \[(.*?)\]/);
+        const jwpConfigMatch = pageHtml.match(/sources: \[(.*?)(\\s*\\n.*?)?\]/);
         if (!jwpConfigMatch || !jwpConfigMatch[1]) {
             console.log(`[Resolver] Could not find jwplayer config on page: ${url}`);
             return null;
         }
 
-        const sourceConfig = JSON.parse(jwpConfigMatch[1].replace(/\\/g, ''));
-        const fileUrl = sourceConfig.file;
+        const sourceConfigString = `[${jwpConfigMatch[1].replace(/\\/g, '')}]`;
+        const sources = JSON.parse(sourceConfigString);
 
-        if (fileUrl) {
-            return fileUrl;
+        // Find HLS (m3u8) source first
+        const hlsSource = sources.find((s: any) => s.file && s.file.includes('.m3u8'));
+        if (hlsSource) {
+            return hlsSource.file;
+        }
+
+        // Fallback to the first available source if no HLS is found
+        const firstSource = sources[0];
+        if (firstSource && firstSource.file) {
+            return firstSource.file;
         }
 
         console.log(`[Resolver] Could not extract file URL from jwplayer config: ${url}`);
@@ -66,6 +79,16 @@ async function resolveWibufile(url: string, headers: any): Promise<string | null
 // --- Pixeldrain Resolver ---
 async function resolvePixeldrain(url: string): Promise<string | null> {
   try {
+    const { data } = await axios.get(url);
+    const $ = load(data);
+    const scriptContent = $("script").text();
+    const m3u8Match = scriptContent.match(/"(https?:[^"]+\.m3u8[^"]*)"/);
+
+    if (m3u8Match && m3u8Match[1]) {
+      return m3u8Match[1];
+    }
+
+    // Fallback to the old method if no m3u8 is found
     const id = new URL(url).pathname.split('/').pop();
     if (!id) return null;
     return `https://pixeldrain.com/api/file/${id}`;
@@ -81,6 +104,14 @@ async function resolveFiledon(url: string): Promise<string | null> {
     const { data } = await axios.get(url);
     const $ = load(data);
 
+    // First, try to find an m3u8 URL in the script tags
+    const scriptContent = $("script").text();
+    const m3u8Match = scriptContent.match(/"(https?:[^"]+\.m3u8[^"]*)"/);
+    if (m3u8Match && m3u8Match[1]) {
+      return m3u8Match[1];
+    }
+
+    // If no m3u8 is found, fall back to the data-page attribute
     const dataPage = $("#app").attr('data-page');
     if (!dataPage) {
         return null;
@@ -90,6 +121,7 @@ async function resolveFiledon(url: string): Promise<string | null> {
     const directUrl = pageProps?.props?.url;
 
     if (directUrl) {
+        // No specific m3u8 check here as it seems to be a direct link
         return directUrl;
     }
 

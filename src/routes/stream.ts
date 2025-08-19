@@ -4,11 +4,10 @@ import { resolveStreamUrl } from "../lib/resolver";
 import axios from "axios";
 
 export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
-  .get("/:slugepisode.mp4", async ({ params, query, set, request }) => {
+  .get("/:slugepisode", async ({ params, query, set, request }) => {
     const startTime = Date.now();
     // Elysia captures params with dots literally. We access it and remove the extension.
-    const slugepisodeWithExt = params['slugepisode.mp4'];
-    const slugepisode = slugepisodeWithExt.replace('.mp4', '');
+    const slugepisode = params['slugepisode'];
     
     const { quality, provider } = query;
 
@@ -50,7 +49,7 @@ export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
                 console.log(`[Stream] Axios TTFB (Time To First Byte) took ${Date.now() - proxyStart}ms`);
 
                 const headers = {
-                    'Content-Type': 'video/mp4',
+                    'Content-Type': 'application/vnd.apple.mpegurl',
                     'Content-Length': response.headers['content-length'],
                     'Accept-Ranges': 'bytes',
                     'Content-Disposition': 'inline'
@@ -89,7 +88,7 @@ export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
         provider: t.Optional(t.String({ description: "Example: 'blogger', 'filedon'" }))
     }),
     params: t.Object({
-        'slugepisode.mp4': t.String({ description: "The episode slug ending with .mp4, e.g., 'one-piece-episode-1.mp4'" })
+        'slugepisode': t.String({ description: "The episode slug, e.g., 'one-piece-episode-1'" })
     }),
     detail: {
         summary: "Proxy Video Stream",
