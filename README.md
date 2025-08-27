@@ -14,7 +14,7 @@ API Scrapper Anime yang dibangun dengan Bun dan Elysia.js. Dilengkapi dengan sis
 
 - **Caching Database Cerdas**: Data stream (link video) untuk setiap episode disimpan di database. API akan selalu memeriksa database terlebih dahulu sebelum melakukan scraping, sehingga respons menjadi sangat cepat jika data sudah ada.
 - **Scraping Otomatis**: Jika data episode tidak ditemukan di database, API akan secara otomatis melakukan scraping dari situs sumber dan menyimpannya untuk permintaan berikutnya.
-- **Proxy Streaming Anti-Download**: Tersedia endpoint `/anime/stream` yang berfungsi sebagai proxy. Ini mengatasi masalah di mana penyedia video memaksa unduhan dan memastikan video dapat diputar langsung di browser atau aplikasi.
+- **Proxy Streaming Canggih (Mendukung Seeking)**: Endpoint `/anime/stream` berfungsi sebagai proxy cerdas. Ini tidak hanya mengatasi masalah di mana penyedia video memaksa unduhan, tetapi juga sepenuhnya mendukung *seeking* (memajukan/memundurkan video) dengan menangani permintaan `Range` HTTP secara benar untuk pengalaman menonton yang modern dan lancar.
 - **Penanganan Link Mati**: Rute streaming secara otomatis akan mencoba beberapa link (jika tersedia untuk kualitas yang sama) hingga menemukan link yang berfungsi, membuatnya lebih tangguh terhadap link yang rusak.
 - **Pembaruan Otomatis Terjadwal**:
     - **Halaman Utama**: Konten di-cache dan diperbarui secara otomatis setiap jam.

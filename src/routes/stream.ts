@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import { db } from "../db/schema";
 import { resolveStreamUrl } from "../lib/resolver";
 import axios from "axios";
+import config from "../../config.json";
 
 export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
   .get("/:slugepisode", async ({ params, query, set, request }) => {
@@ -35,25 +36,68 @@ export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
         console.log(`[Stream] Attempting to resolve: ${streamToTry.embed_url}`);
         const resolveStart = Date.now();
         const clientIp = request.headers.get('x-forwarded-for');
-        const directUrl = await resolveStreamUrl(streamToTry.embed_url, request.headers, clientIp || undefined);
+        const refererUrl = new URL(slugepisode, config.samehadaku.baseUrl).href;
+        const directUrl = await resolveStreamUrl(streamToTry.embed_url, request.headers, clientIp || undefined, refererUrl);
         console.log(`[Stream] Resolving URL took ${Date.now() - resolveStart}ms`);
 
         if (directUrl) {
-            console.log(`[Stream] Resolved to: ${directUrl}. Starting video stream proxy.`);
             try {
+                // --- Transparent Proxy Logic ---
+                // 1. Clone incoming headers from the client.
+                const proxyHeaders: Record<string, any> = { ...request.headers };
+
+                // 2. Delete headers that are set by the proxy or are connection-specific.
+                delete proxyHeaders['host'];
+                delete proxyHeaders['connection'];
+                delete proxyHeaders['sec-fetch-site'];
+                delete proxyHeaders['sec-fetch-mode'];
+                delete proxyHeaders['sec-fetch-dest'];
+
+                // 3. Set the correct Referer based on the provider.
+                // Using the original content page as the referer for all providers ensures consistent behavior
+                // for features like HTTP Range requests (seeking).
+                const finalReferer = refererUrl;
+                proxyHeaders['referer'] = finalReferer;
+
+                // 4. Explicitly handle the Range header to ensure seeking works.
+                const range = request.headers.get('range');
+                delete proxyHeaders['range']; // Remove original to avoid duplicates
+                if (range) {
+                    proxyHeaders['Range'] = range; // Ensure correct capitalization
+                }
+
+                console.log(`[Stream] Resolved to: ${directUrl}. Starting transparent proxy with Referer: ${finalReferer}`);
+
                 const proxyStart = Date.now();
                 const response = await axios.get(directUrl, { 
                     responseType: 'stream', 
-                    headers: { 'Referer': streamToTry.embed_url } 
+                    headers: proxyHeaders as Record<string, string>,
+                    timeout: 300000, // 5 minutes timeout
+                    validateStatus: status => status >= 200 && status < 400 // Accept 2xx and 3xx responses
                 });
-                console.log(`[Stream] Axios TTFB (Time To First Byte) took ${Date.now() - proxyStart}ms`);
+                console.log(`[Stream] Axios TTFB (Time To First Byte) took ${Date.now() - proxyStart}ms. Source status: ${response.status}`);
 
-                const headers = {
-                    'Content-Type': 'application/vnd.apple.mpegurl',
-                    'Content-Length': response.headers['content-length'],
-                    'Accept-Ranges': 'bytes',
-                    'Content-Disposition': 'inline'
-                };
+                // Prepare headers for the client response, copying from the source.
+                const responseHeaders = new Headers();
+                
+                // --- Content-Type Logic ---
+                let contentType = response.headers['content-type']; // Start with source's content-type
+                if (directUrl.includes('.m3u8')) {
+                    contentType = 'application/vnd.apple.mpegurl';
+                } else if (directUrl.includes('.mp4')) {
+                    contentType = 'video/mp4';
+                }
+                responseHeaders.set('Content-Type', contentType || 'video/mp4'); // Fallback to video/mp4
+
+                responseHeaders.set('Accept-Ranges', 'bytes');
+                responseHeaders.set('Content-Disposition', 'inline');
+
+                if (response.headers['content-length']) {
+                    responseHeaders.set('Content-Length', response.headers['content-length']);
+                }
+                if (response.headers['content-range']) {
+                    responseHeaders.set('Content-Range', response.headers['content-range']);
+                }
 
                 const videoStream = new ReadableStream({
                     start(controller) {
@@ -71,9 +115,18 @@ export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
                     }
                 });
                 
-                return new Response(videoStream, { headers });
-            } catch (error) {
-                console.error(`[Stream] Proxy failed for resolved URL: ${directUrl}. Trying next link. Total time: ${Date.now() - startTime}ms`, error);
+                // Return response with the source's status code (e.g., 200 for full, 206 for partial)
+                return new Response(videoStream, { 
+                    status: response.status,
+                    headers: responseHeaders
+                });
+
+            } catch (error: any) {
+                if (error.response) {
+                    console.error(`[Stream] Proxy failed for resolved URL: ${directUrl}. Source responded with ${error.response.status}.`, error.response.data);
+                } else {
+                    console.error(`[Stream] Proxy failed for resolved URL: ${directUrl}. Trying next link. Total time: ${Date.now() - startTime}ms`, error.message);
+                }
             }
         }
     }

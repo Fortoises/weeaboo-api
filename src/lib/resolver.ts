@@ -1,6 +1,8 @@
 import axios from "axios";
 import { load } from "cheerio";
 import config from "../../config.json";
+import { CookieJar } from 'tough-cookie';
+import { wrapper as axiosCookieJarSupport } from 'axios-cookiejar-support';
 
 // --- Blogger Resolver ---
 async function resolveBlogger(url: string, headers: any, ip: string | undefined): Promise<string | null> {
@@ -17,13 +19,11 @@ async function resolveBlogger(url: string, headers: any, ip: string | undefined)
 
     const configJson = JSON.parse(match[1]);
     
-    // Prioritize HLS stream if available
     const hlsStream = configJson.streams.find((s: any) => s.play_url && s.play_url.includes('.m3u8'));
     if (hlsStream) {
         return hlsStream.play_url;
     }
 
-    // Fallback to the highest quality stream
     const stream = configJson.streams.sort((a: any, b: any) => b.height - a.height)[0];
     return stream ? stream.play_url : null;
   } catch (error) {
@@ -32,70 +32,79 @@ async function resolveBlogger(url: string, headers: any, ip: string | undefined)
   }
 }
 
-// --- Wibufile Resolver (Hybrid Approach - Final) ---
-async function resolveWibufile(url: string, headers: any): Promise<string | null> {
-    if (url.includes('.m3u8') || url.includes('.mp4')) {
-        return url;
-    }
+// --- Wibufile Resolver (Robust Regex) ---
+async function resolveWibufile(url: string, headers: any, refererUrl?: string): Promise<string | null> {
+    const finalReferer = refererUrl || config.samehadaku.baseUrl;
+    console.log(`[Resolver] Attempting to resolve Wibufile embed page: ${url} with Referer: ${finalReferer}`);
 
     try {
         const { data: pageHtml } = await axios.get(url, {
             headers: {
-                'Referer': config.samehadaku.baseUrl, // Or any valid referer
                 'User-Agent': headers['user-agent'],
+                'Referer': finalReferer,
+            },
+        });
+
+        // Use a more robust regex to find the URL, tolerating different quotes and spacing.
+        const apiUrlMatch = pageHtml.match(/url:\s*["'](.*api\.wibufile\.com\/api\/\?.*?)["']/);
+        if (!apiUrlMatch || !apiUrlMatch[1]) {
+            console.error(`[Resolver] Could not find dynamic API URL in Wibufile page with robust regex.`);
+            return null;
+        }
+        // Prepend https: if the URL starts with //
+        const dynamicApiUrl = apiUrlMatch[1].startsWith('//') ? `https:${apiUrlMatch[1]}` : apiUrlMatch[1];
+        console.log(`[Resolver] Found dynamic Wibufile API URL: ${dynamicApiUrl}`);
+
+        const { data: apiResponse } = await axios.get(dynamicApiUrl, {
+            headers: {
+                'User-Agent': headers['user-agent'],
+                'Referer': url, 
             }
         });
 
-        const jwpConfigMatch = pageHtml.match(/sources: \[(.*?)(\\s*\\n.*?)?\]/);
-        if (!jwpConfigMatch || !jwpConfigMatch[1]) {
-            console.log(`[Resolver] Could not find jwplayer config on page: ${url}`);
+        if (apiResponse.status !== 'ok' || !apiResponse.sources || apiResponse.sources.length === 0) {
+            console.error(`[Resolver] Wibufile dynamic API call failed or returned no sources. Response:`, apiResponse.message || 'No message');
             return null;
         }
 
-        const sourceConfigString = `[${jwpConfigMatch[1].replace(/\\/g, '')}]`;
-        const sources = JSON.parse(sourceConfigString);
-
-        // Find HLS (m3u8) source first
+        const sources = apiResponse.sources;
         const hlsSource = sources.find((s: any) => s.file && s.file.includes('.m3u8'));
-        if (hlsSource) {
+        if (hlsSource && hlsSource.file) {
             return hlsSource.file;
         }
 
-        // Fallback to the first available source if no HLS is found
         const firstSource = sources[0];
         if (firstSource && firstSource.file) {
             return firstSource.file;
         }
 
-        console.log(`[Resolver] Could not extract file URL from jwplayer config: ${url}`);
         return null;
 
-    } catch (error) {
-        console.error(`[Resolver] Failed to resolve Wibufile URL: ${url}`, error);
+    } catch (error: any) {
+        console.error(`[Resolver] Failed to resolve Wibufile embed page ${url}:`, error.message);
         return null;
     }
 }
 
+
 // --- Pixeldrain Resolver ---
 async function resolvePixeldrain(url: string): Promise<string | null> {
-  try {
-    const { data } = await axios.get(url);
-    const $ = load(data);
-    const scriptContent = $("script").text();
-    const m3u8Match = scriptContent.match(/"(https?:[^"]+\.m3u8[^"]*)"/);
-
-    if (m3u8Match && m3u8Match[1]) {
-      return m3u8Match[1];
-    }
-
-    // Fallback to the old method if no m3u8 is found
     const id = new URL(url).pathname.split('/').pop();
     if (!id) return null;
-    return `https://pixeldrain.com/api/file/${id}`;
-  } catch (error) {
-    console.error(`[Resolver] Failed to resolve Pixeldrain URL: ${url}`, error);
-    return null;
-  }
+
+    const infoUrl = `https://pixeldrain.com/api/file/${id}/info`;
+    const downloadUrl = `https://pixeldrain.com/api/file/${id}`;
+
+    try {
+        const { data: info } = await axios.get(infoUrl);
+        if (!info.success) {
+            console.warn(`[Resolver] Pixeldrain file ${id} is not available or info check failed.`);
+            return null;
+        }
+        return downloadUrl;
+    } catch (error: any) {
+        return null;
+    }
 }
 
 // --- Filedon Resolver ---
@@ -104,28 +113,17 @@ async function resolveFiledon(url: string): Promise<string | null> {
     const { data } = await axios.get(url);
     const $ = load(data);
 
-    // First, try to find an m3u8 URL in the script tags
     const scriptContent = $("script").text();
     const m3u8Match = scriptContent.match(/"(https?:[^"]+\.m3u8[^"]*)"/);
     if (m3u8Match && m3u8Match[1]) {
       return m3u8Match[1];
     }
 
-    // If no m3u8 is found, fall back to the data-page attribute
     const dataPage = $("#app").attr('data-page');
-    if (!dataPage) {
-        return null;
-    }
+    if (!dataPage) return null;
 
     const pageProps = JSON.parse(dataPage);
-    const directUrl = pageProps?.props?.url;
-
-    if (directUrl) {
-        // No specific m3u8 check here as it seems to be a direct link
-        return directUrl;
-    }
-
-    return null;
+    return pageProps?.props?.url || null;
 
   } catch (error) {
     console.error(`[Resolver] Failed to resolve Filedon URL: ${url}`, error);
@@ -134,14 +132,20 @@ async function resolveFiledon(url: string): Promise<string | null> {
 }
 
 // --- Main Resolver Function ---
-export async function resolveStreamUrl(streamUrl: string, headers: any, ip: string | undefined): Promise<string | null> {
+export async function resolveStreamUrl(streamUrl: string, headers: any, ip: string | undefined, refererUrl?: string): Promise<string | null> {
+  // If the URL is already a direct video link, return it immediately.
+  if (streamUrl.includes('.mp4') || streamUrl.includes('.m3u8') || streamUrl.includes('s0.wibufile.com')) {
+    console.log(`[Resolver] URL is already a direct link, skipping resolution: ${streamUrl}`);
+    return streamUrl;
+  }
+
   const hostname = new URL(streamUrl).hostname;
 
   if (hostname.includes('blogger.com')) {
     return resolveBlogger(streamUrl, headers, ip);
   }
-  if (hostname.includes('wibufile.com')) {
-    return resolveWibufile(streamUrl, headers);
+  if (hostname.includes('api.wibufile.com')) {
+    return resolveWibufile(streamUrl, headers, refererUrl);
   }
   if (hostname.includes('pixeldrain.com')) {
     return resolvePixeldrain(streamUrl);
@@ -154,5 +158,6 @@ export async function resolveStreamUrl(streamUrl: string, headers: any, ip: stri
     return null;
   }
 
+  console.warn(`[Resolver] No resolver found for hostname: ${hostname}`);
   return null;
 }
