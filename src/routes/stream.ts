@@ -3,6 +3,11 @@ import { db } from "../db/schema";
 import { resolveStreamUrl } from "../lib/resolver";
 import axios from "axios";
 import config from "../../config.json";
+import { SimpleCache } from "../lib/cache";
+
+// Cache for resolved direct stream URLs. From the logs, these URLs seem to be valid for at least an hour.
+// We cache them for 55 minutes to be safe. This prevents re-resolving the URL for every single video chunk request.
+const resolvedUrlCache = new SimpleCache<string>(3300);
 
 export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
   .get("/:slugepisode", async ({ params, query, set, request }) => {
@@ -33,12 +38,22 @@ export const streamRoutes = new Elysia({ prefix: "/anime/stream" })
     console.log(`[Stream] Found ${matchingStreams.length} matching stream(s) in DB. Attempting to resolve...`);
 
     for (const streamToTry of matchingStreams) {
-        console.log(`[Stream] Attempting to resolve: ${streamToTry.embed_url}`);
-        const resolveStart = Date.now();
-        const clientIp = request.headers.get('x-forwarded-for');
+        let directUrl = resolvedUrlCache.get(streamToTry.embed_url);
         const refererUrl = new URL(slugepisode, config.samehadaku.baseUrl).href;
-        const directUrl = await resolveStreamUrl(streamToTry.embed_url, request.headers, clientIp || undefined, refererUrl);
-        console.log(`[Stream] Resolving URL took ${Date.now() - resolveStart}ms`);
+
+        if (!directUrl) {
+            console.log(`[Cache] No resolved URL in cache for ${streamToTry.embed_url}. Resolving...`);
+            const resolveStart = Date.now();
+            const clientIp = request.headers.get('x-forwarded-for');
+            directUrl = await resolveStreamUrl(streamToTry.embed_url, request.headers, clientIp || undefined, refererUrl);
+            console.log(`[Stream] Resolving URL took ${Date.now() - resolveStart}ms`);
+    
+            if (directUrl) {
+                resolvedUrlCache.set(streamToTry.embed_url, directUrl);
+            }
+        } else {
+            console.log(`[Cache] Found resolved URL in cache for ${streamToTry.embed_url}.`);
+        }
 
         if (directUrl) {
             try {
