@@ -33,6 +33,7 @@ const schema = `
       embed_url TEXT NOT NULL UNIQUE,
       provider TEXT,
       quality TEXT,
+      source TEXT,
       FOREIGN KEY (episode_slug) REFERENCES episodes(episode_slug) ON DELETE CASCADE
     );
 

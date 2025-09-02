@@ -42,7 +42,6 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
         return { message: `Anime with slug '${slug}' could not be found or mapped.` };
     }
 
-    // Fetch anime details using the resolved Samehadaku slug.
     return getAnime(resolvedSlug.replace(/\/anime\/|\//g, ""));
 
   }, { detail: { summary: 'Get Anime Details by Slug', description: 'Accepts a clean (Anilist-style) or Samehadaku-style slug and returns the anime details.', tags: ['Anime'] } })
@@ -50,24 +49,20 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
   .get("/:slug/episode/:episode_number", async ({ params, set }) => {
     const { slug, episode_number } = params;
 
-    // 1. Resolve the provided slug to a definitive Samehadaku base slug.
     const samehadakuBaseSlug = await resolveSamehadakuSlug(slug);
     if (!samehadakuBaseSlug) {
         set.status = 404;
         return { message: `Anime with slug '${slug}' could not be found or mapped.` };
     }
 
-    // 2. Construct the potential episode slug for scraping and for DB lookup.
     const cleanedBaseSlug = samehadakuBaseSlug.replace(/\/anime\/|\//g, "");
     const constructedEpisodeSlug = `${cleanedBaseSlug}-episode-${episode_number}`;
     let title = `${slug} Episode ${episode_number}`;
 
-    // 3. Try to get streams from the database first.
     let streamsFromDb = db.query(
-        `SELECT server_name, embed_url, provider, quality FROM streams WHERE episode_slug = ?`
-    ).all(constructedEpisodeSlug) as { server_name: string; embed_url: string; provider: string | null; quality: string | null }[];
+        `SELECT server_name, embed_url, provider, quality, source FROM streams WHERE episode_slug = ?`
+    ).all(constructedEpisodeSlug) as { server_name: string; embed_url: string; provider: string | null; quality: string | null; source: string | null }[];
 
-    // 4. If DB is empty, scrape from sources.
     if (streamsFromDb.length === 0) {
         console.log(`[Cache] No streams found in DB for ${constructedEpisodeSlug}. Scraping...`);
         const [samehadakuResult, oploverzResult] = await Promise.all([
@@ -76,27 +71,31 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
         ]);
 
         const freshStreams: any[] = [];
-        if (samehadakuResult?.streams) freshStreams.push(...samehadakuResult.streams);
-        if (oploverzResult?.streams) freshStreams.push(...oploverzResult.streams);
+        if (samehadakuResult?.streams) {
+            samehadakuResult.streams.forEach(s => freshStreams.push({ ...s, source: 'Samehadaku' }));
+        }
+        if (oploverzResult?.streams) {
+            oploverzResult.streams.forEach(s => freshStreams.push({ ...s, source: 'Oploverz' }));
+        }
         
         if (samehadakuResult?.title) title = samehadakuResult.title;
         else if (oploverzResult?.title) title = oploverzResult.title;
 
         if (freshStreams.length > 0) {
             const insertStmt = db.prepare(
-                `INSERT OR IGNORE INTO streams (episode_slug, server_name, embed_url, provider, quality) VALUES (?, ?, ?, ?, ?)`
+                `INSERT OR IGNORE INTO streams (episode_slug, server_name, embed_url, provider, quality, source) VALUES (?, ?, ?, ?, ?, ?)`
             );
             db.transaction(() => {
                 for (const stream of freshStreams) {
                     const { provider, quality } = parseServerString(stream.server, stream.embed_url);
-                    insertStmt.run(constructedEpisodeSlug, stream.server, stream.embed_url, provider, quality);
+                    insertStmt.run(constructedEpisodeSlug, stream.server, stream.embed_url, provider, quality, stream.source);
                 }
             })();
             scheduleBackup();
             console.log(`[Cache] Saved ${freshStreams.length} new streams to DB for ${constructedEpisodeSlug}.`);
             
             streamsFromDb = db.query(
-                `SELECT server_name, embed_url, provider, quality FROM streams WHERE episode_slug = ?`
+                `SELECT server_name, embed_url, provider, quality, source FROM streams WHERE episode_slug = ?`
             ).all(constructedEpisodeSlug) as any;
         }
     } else {
@@ -108,7 +107,6 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
         return { message: "Episode not found on any provider." };
     }
 
-    // 5. Format the final response.
     return {
         title,
         streams: streamsFromDb.map(s => {
@@ -121,7 +119,8 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
                 provider: s.provider,
                 quality: s.quality,
                 embed_url: s.embed_url,
-                stream_url: streamUrl
+                stream_url: streamUrl,
+                source: s.source ?? 'Unknown'
             }
         })
     };
@@ -144,6 +143,7 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
                 quality: t.Nullable(t.String()),
                 embed_url: t.String(),
                 stream_url: t.Nullable(t.String()),
+                source: t.String()
             }))
         }),
         404: t.Object({ message: t.String() })
