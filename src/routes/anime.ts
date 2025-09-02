@@ -63,8 +63,8 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
 
   }, { detail: { summary: 'Get Anime Details by Slug', description: 'Accepts a clean (Anilist-style) or Samehadaku-style slug and returns the anime details.', tags: ['Anime'] } })
 
-  .get("/:slug/episode/:episode_number", async ({ params, set }) => {
-    const { slug, episode_number } = params;
+  .get("/:slug/episode/:episode_identifier", async ({ params, set }) => {
+    const { slug, episode_identifier } = params;
 
     const samehadakuBaseSlug = await resolveSamehadakuSlug(slug);
     if (!samehadakuBaseSlug) {
@@ -73,8 +73,8 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
     }
 
     const cleanedBaseSlug = samehadakuBaseSlug.replace(/\/anime\/|\//g, "");
-    const constructedEpisodeSlug = `${cleanedBaseSlug}-episode-${episode_number}`;
-    let title = `${slug} Episode ${episode_number}`;
+    const constructedEpisodeSlug = `${cleanedBaseSlug}-episode-${episode_identifier}`;
+    let title = `${slug} Episode ${episode_identifier}`;
 
     let streamsFromDb = db.query(
         `SELECT server_name, embed_url, provider, quality, source FROM streams WHERE episode_slug = ?`
@@ -111,9 +111,17 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
             scheduleBackup();
             console.log(`[Cache] Saved ${freshStreams.length} new streams to DB for ${constructedEpisodeSlug}.`);
             
-            streamsFromDb = db.query(
-                `SELECT server_name, embed_url, provider, quality, source FROM streams WHERE episode_slug = ?`
-            ).all(constructedEpisodeSlug) as any;
+            // Use the freshly scraped data directly for the response, no need to re-read from DB.
+            streamsFromDb = freshStreams.map(stream => {
+                const { provider, quality } = parseServerString(stream.server, stream.embed_url);
+                return {
+                    server_name: stream.server,
+                    embed_url: stream.embed_url,
+                    provider,
+                    quality,
+                    source: stream.source
+                };
+            });
         }
     } else {
         console.log(`[Cache] Found ${streamsFromDb.length} streams in DB for ${constructedEpisodeSlug}.`);
@@ -144,7 +152,7 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
   }, {
     params: t.Object({
         slug: t.String(),
-        episode_number: t.Numeric()
+        episode_identifier: t.String()
     }),
     detail: {
         summary: "Get Episode Streams by Number",

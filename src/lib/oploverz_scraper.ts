@@ -10,82 +10,57 @@ const client = axios.create({
   timeout: 45000, // 45 second timeout
 });
 
-/**
- * A dictionary for known anime name variations between Samehadaku and Oploverz.
- * This can be expanded over time.
- * Key: Samehadaku name part, Value: Oploverz name part
- */
 const animeNameMap: { [key: string]: string } = {
     'kaijuu-8-gou': 'kaiju-no-8',
-    // Add other known variations here
 };
 
 /**
- * Parses a Samehadaku slug into its core components in a generic way.
- * @param slug The episode slug from Samehadaku.
- * @returns An object containing the anime part, season number, and episode number.
+ * Parses a Samehadaku episode slug into its core components.
+ * Now handles numeric and text-based episode identifiers.
  */
 const parseSamehadakuSlug = (slug: string) => {
     if (!slug) return null;
-    // Regex to capture the main anime title part, optional season, and episode number.
-    // It looks for "-episode-" as a primary separator. Using a non-greedy (.*?) match.
-    const match = slug.match(/^(.*?)(-season-\d+)?-episode-(\d+)$/);
+    const match = slug.match(/^(.*?)(-season-\d+)?-episode-(.+)$/);
 
-    if (!match) {
-        // Fallback for slugs without "-episode-" (less common, but good to have)
-        const fallbackMatch = slug.match(/^(.*)-(\d+)$/);
-        if (!fallbackMatch) return null;
-        return {
-            animePart: fallbackMatch[1],
-            season: null,
-            episode: fallbackMatch[2],
-        };
-    }
+    if (!match) return null;
 
     return {
         animePart: match[1],
-        season: match[2] ? match[2].replace('-season-', '') : null, // a number like '2'
-        episode: match[3], // a number like '4'
+        season: match[2] ? match[2].replace('-season-', '') : null,
+        episodeIdentifier: match[3], // Can be "12" or "spesial"
     };
 };
 
 /**
  * Transforms the parsed Samehadaku slug components into an Oploverz slug.
- * @param parsedSlug The parsed components from a Samehadaku slug.
- * @returns A string representing the potential Oploverz slug.
  */
 const transformToOploverzSlug = (parsedSlug: any): string | null => {
     if (!parsedSlug) return null;
 
-    let { animePart, season, episode } = parsedSlug;
+    let { animePart, season, episodeIdentifier } = parsedSlug;
 
-    // 1. Transform Anime Name
-    // Check if the anime name is in our manual map for known complex variations.
     if (animeNameMap[animePart]) {
         animePart = animeNameMap[animePart];
     }
-    // Future-proofing: could add more generic string normalization here if needed.
 
-    // 2. Transform Season
     const seasonPart = season ? `-s${season}` : '';
 
-    // 3. Transform Episode Number
-    // Oploverz seems to use 2 or 3 digits. We'll pad based on magnitude.
-    const episodeNumber = parseInt(episode, 10);
-    const episodePart = episodeNumber < 100 ? `-${String(episodeNumber).padStart(2, '0')}` : `-${String(episodeNumber).padStart(3, '0')}`;
+    const episodeNumber = parseInt(episodeIdentifier, 10);
+    let episodePart: string;
 
-    // 4. Construct the final slug
-    // Oploverz slugs often end with "-subtitle-indonesia" or "-remastered". 
-    // We will try the most common one first.
-    // The logic in the route handler can try multiple variations if this one fails.
-    const constructedSlug = `${animePart}${seasonPart}-episode${episodePart}-subtitle-indonesia`;
-
-    // Handle special cases like One Piece remastered
-    if (animePart === 'one-piece' && episodeNumber < 1000) { // Assuming remastered is for earlier episodes
-        return `${animePart}-episode-${String(episodeNumber).padStart(3, '0')}-remastered`;
+    // Check if the identifier is a number or text
+    if (!isNaN(episodeNumber)) {
+        // It's a number, apply padding and special One Piece logic
+        if (animePart === 'one-piece' && episodeNumber < 1000) {
+            return `${animePart}-episode-${String(episodeNumber).padStart(3, '0')}-remastered`;
+        }
+        episodePart = episodeNumber < 100 ? `-${String(episodeNumber).padStart(2, '0')}` : `-${String(episodeNumber).padStart(3, '0')}`;
+    } else {
+        // It's text (e.g., "spesial"), use it directly
+        episodePart = `-${episodeIdentifier}`;
     }
 
-    return constructedSlug;
+    return `${animePart}${seasonPart}-episode${episodePart}-subtitle-indonesia`;
 };
 
 

@@ -101,18 +101,47 @@ export const getAnime = async (id: string) => {
   });
 
   const episodes: { title: string, episode: string }[] = [];
+  const addedEpisodes = new Set<string>(); // Keep track of added episodes
+
   $(".epsleft a").each((_, episode) => {
-    const href = $(episode).attr('href');
-    if (!href) return;
-
+    const href = $(episode).attr('href') || '';
     const title = $(episode).text().trim();
-    const episodeMatch = href.match(/episode-(\d+)/);
-    const episodeNumber = episodeMatch ? episodeMatch[1] : "0";
+    let finalIdentifier: string | null = null;
 
-    episodes.push({
-        title: title,
-        episode: episodeNumber
-    });
+    // Priority 1: Match /...-episode-123 or /...-episode-special
+    let match = href.match(/episode-([a-zA-Z0-9]+)/);
+    if (match && match[1]) {
+        finalIdentifier = match[1];
+    } else {
+        // Priority 2: Match /...-123/ (a number at the end of the path)
+        match = href.match(/-(\d+)\/?$/);
+        if (match && match[1]) {
+            finalIdentifier = match[1];
+        }
+    }
+
+    // If we found a valid identifier and it's not a duplicate
+    if (finalIdentifier && !addedEpisodes.has(finalIdentifier)) {
+        episodes.push({
+            title: title,
+            episode: finalIdentifier
+        });
+        addedEpisodes.add(finalIdentifier);
+    }
+  });
+
+  // Sort episodes: numeric descending, specials at the end alphabetically
+  episodes.sort((a, b) => {
+    const numA = parseInt(a.episode, 10);
+    const numB = parseInt(b.episode, 10);
+
+    const aIsNum = !isNaN(numA);
+    const bIsNum = !isNaN(numB);
+
+    if (aIsNum && bIsNum) return numB - numA; // Corrected to descending order
+    if (aIsNum) return -1; // numbers first
+    if (bIsNum) return 1;  // specials after numbers
+    return a.episode.localeCompare(b.episode); // sort specials alphabetically
   });
 
   const result = {
@@ -201,7 +230,34 @@ export const getStreamResource = ({ name: _, ...resource }: any) => {
   }
   return client.post("wp-admin/admin-ajax.php", form).then(({ data }) => {
     const $ = load(data);
-    return $("iframe").attr("src")!;
+
+    // Priority 1: Find an iframe src
+    const iframeSrc = $("iframe").attr("src");
+    if (iframeSrc) {
+      return iframeSrc;
+    }
+
+    // Priority 2: Find a script src with an embeddable player URL
+    const scriptSrc = $('script[src*="embed"]').attr("src");
+    if (scriptSrc) {
+      return scriptSrc;
+    }
+
+    // Priority 3: Find a [drama id=...] shortcode
+    const dramaMatch = data.match(/\[drama id=([^\]]+)\]/);
+    if (dramaMatch && dramaMatch[1]) {
+      // This might need a dedicated resolver later, but for now, we return a placeholder or a known URL structure if possible.
+      // This part is a guess and might need adjustment.
+      console.warn(`[Samehadaku] Found a [drama] shortcode. This type of embed is not fully supported yet. ID: ${dramaMatch[1]}`);
+      // return `https://some-drama-player.com/${dramaMatch[1]}`; // Example
+    }
+
+    console.warn(`[Samehadaku] AJAX response for post ${resource.post} did not contain a known embed format. Response:`, data);
+    return null;
+
+  }).catch(error => {
+    console.error(`[Samehadaku] AJAX request failed for post ${resource.post}. Status: ${error.response?.status}. Data:`, error.response?.data);
+    return null;
   });
 };
 
