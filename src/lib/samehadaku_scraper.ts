@@ -100,11 +100,18 @@ export const getAnime = async (id: string) => {
     genres.push($(el).text().trim());
   });
 
-  const episodes: { title: string, videoID: string }[] = [];
+  const episodes: { title: string, episode: string }[] = [];
   $(".epsleft a").each((_, episode) => {
+    const href = $(episode).attr('href');
+    if (!href) return;
+
+    const title = $(episode).text().trim();
+    const episodeMatch = href.match(/episode-(\d+)/);
+    const episodeNumber = episodeMatch ? episodeMatch[1] : "0";
+
     episodes.push({
-        title: $(episode).text().trim(),
-        videoID: new URL($(episode).attr('href')!).pathname
+        title: title,
+        episode: episodeNumber
     });
   });
 
@@ -120,7 +127,7 @@ export const getAnime = async (id: string) => {
     studio: details["studio"],
     producers: details["producers"],
     genres,
-    streamingEpisodes: episodes,
+    episodes: episodes,
   };
 
   animeCache.set(id, result);

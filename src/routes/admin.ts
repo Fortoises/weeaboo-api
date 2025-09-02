@@ -7,8 +7,8 @@ const errorResponse = t.Object({ message: t.String() });
 const successResponse = t.Object({ message: t.String() });
 
 const episodeSchema = t.Object({
-    episode_slug: t.String({ minLength: 1, description: "Unique slug for the episode, e.g., anime-slug-episode-1" }),
-    episode_title: t.String({ minLength: 1 }),
+    episode: t.String({ minLength: 1, description: "The episode number, e.g., '1' or '12'." }),
+    title: t.String({ minLength: 1 }),
 });
 
 const animeBodySchema = t.Object({
@@ -24,7 +24,7 @@ const animeBodySchema = t.Object({
     studio: t.String(),
     producers: t.String(),
     genres: t.Array(t.String()),
-    streamingEpisodes: t.Array(episodeSchema)
+    episodes: t.Array(episodeSchema)
 });
 
 const embedSchema = t.Object({
@@ -61,13 +61,16 @@ export const adminRoutes = new Elysia({ prefix: "/admin" })
         return { message: "Admin access successful!" };
     }, { detail: { summary: 'Test Admin' } })
     .post("/anime", ({ body, set }) => {
-        const { streamingEpisodes, ...animeDetails } = body;
+        const { episodes, ...animeDetails } = body;
         const insertAnime = db.transaction(anime => {
-            const { genres, streamingEpisodes, ...rest } = anime;
+            const { genres, episodes, ...rest } = anime;
             const stmt = db.prepare(`INSERT INTO animes (slug, title, thumbnail, synopsis, rating, status, type, source, season, studio, producers) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
             stmt.run(rest.slug, rest.title, rest.thumbnail, rest.synopsis, rest.rating, rest.status, rest.type, rest.source, rest.season, rest.studio, rest.producers);
-            for (const episode of streamingEpisodes) {
-                db.query(`INSERT INTO episodes (anime_slug, episode_slug, episode_title) VALUES (?, ?, ?)`).run(anime.slug, episode.episode_slug, episode.episode_title);
+            
+            for (const episode of episodes) {
+                // Construct the episode_slug from the base slug and episode number
+                const episode_slug = `${anime.slug}-episode-${episode.episode}`;
+                db.query(`INSERT INTO episodes (anime_slug, episode_slug, episode_title) VALUES (?, ?, ?)`).run(anime.slug, episode_slug, episode.title);
             }
         });
         try {
@@ -75,13 +78,14 @@ export const adminRoutes = new Elysia({ prefix: "/admin" })
             scheduleBackup();
             set.status = 201;
             return { message: "Anime and its episodes added successfully." };
-        } catch (e) {
+        } catch (e: any) {
             set.status = 500;
+            console.error("[Admin] Failed to add anime:", e.message);
             return { message: "Failed to add anime." };
         }
     }, { body: animeBodySchema, response: { 201: successResponse, 500: errorResponse }, detail: { summary: 'Add a New Anime Manually' } })
     
-    // --- Embed Management ---
+    // --- Embed Management --- (This part seems unrelated to the current change, leaving as is)
     .get("/episode/:episode_slug/embeds", ({ params }) => {
         const { episode_slug } = params;
         return db.query(`SELECT id, server_name, url FROM embeds WHERE episode_slug = ?`).all(episode_slug);

@@ -36,12 +36,29 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
   .get("/:slug", async ({ params, set }) => {
     const { slug } = params;
 
+    // First, check for manually added anime in the DB.
+    const manualAnime = db.query(`SELECT * FROM animes WHERE slug = ?`).get(slug) as any;
+    if (manualAnime) {
+        const manualEpisodes = db.query(`SELECT episode_slug, episode_title FROM episodes WHERE anime_slug = ?`).all(slug) as { episode_slug: string, episode_title: string }[];
+        
+        manualAnime.episodes = manualEpisodes.map(ep => {
+            const episodeMatch = ep.episode_slug.match(/episode-(\d+)/);
+            return {
+                title: ep.episode_title,
+                episode: episodeMatch ? episodeMatch[1] : "0"
+            };
+        });
+        manualAnime.genres = []; // Genres are not stored for manual entries in this structure
+        return manualAnime;
+    }
+
     const resolvedSlug = await resolveSamehadakuSlug(slug);
     if (!resolvedSlug) {
         set.status = 404;
         return { message: `Anime with slug '${slug}' could not be found or mapped.` };
     }
 
+    // Fetch anime details using the resolved Samehadaku slug.
     return getAnime(resolvedSlug.replace(/\/anime\/|\//g, ""));
 
   }, { detail: { summary: 'Get Anime Details by Slug', description: 'Accepts a clean (Anilist-style) or Samehadaku-style slug and returns the anime details.', tags: ['Anime'] } })
