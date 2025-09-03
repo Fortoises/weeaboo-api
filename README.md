@@ -12,9 +12,10 @@ API Scrapper Anime yang dibangun dengan Bun dan Elysia.js. Dilengkapi dengan sis
 
 ## Fitur Unggulan
 
+- **Sistem Slug Cerdas & Fleksibel**: API dapat menerima berbagai format slug (baik slug bersih seperti `one-piece` maupun slug spesifik dari sumber seperti `one-piece-season-20`) dan secara cerdas menemukannya di situs sumber. Ini membuat API lebih tangguh dan mudah digunakan.
 - **Caching Database Cerdas**: Data stream (link video) untuk setiap episode disimpan di database. API akan selalu memeriksa database terlebih dahulu sebelum melakukan scraping, sehingga respons menjadi sangat cepat jika data sudah ada.
-- **Scraping Otomatis**: Jika data episode tidak ditemukan di database, API akan secara otomatis melakukan scraping dari situs sumber dan menyimpannya untuk permintaan berikutnya.
-- **Proxy Streaming Canggih (Mendukung Seeking)**: Endpoint `/anime/stream` berfungsi sebagai proxy cerdas. Ini tidak hanya mengatasi masalah di mana penyedia video memaksa unduhan, tetapi juga sepenuhnya mendukung *seeking* (memajukan/memundurkan video) dengan menangani permintaan `Range` HTTP secara benar untuk pengalaman menonton yang modern dan lancar.
+- **Scraping Otomatis dari Berbagai Sumber**: Jika data episode tidak ditemukan di database, API akan secara otomatis melakukan scraping dari **Samehadaku & Oploverz**, lalu menggabungkan hasilnya dan menyimpannya untuk permintaan berikutnya.
+- **Proxy Streaming Canggih (Mendukung Seeking)**: Endpoint `/anime/stream` berfungsi sebagai proxy cerdas. Ini tidak hanya mengatasi masalah di mana penyedia video memaksa unduhan, tetapi juga sepenuhnya mendukung *seeking* (memajukan/memundurkan video) dengan menangani permintaan `Range` HTTP secara benar.
 - **Penanganan Link Mati**: Rute streaming secara otomatis akan mencoba beberapa link (jika tersedia untuk kualitas yang sama) hingga menemukan link yang berfungsi, membuatnya lebih tangguh terhadap link yang rusak.
 - **Pembaruan Otomatis Terjadwal**:
     - **Halaman Utama**: Konten di-cache dan diperbarui secara otomatis setiap jam.
@@ -73,9 +74,11 @@ API Scrapper Anime yang dibangun dengan Bun dan Elysia.js. Dilengkapi dengan sis
 
 Alur kerja untuk mendapatkan dan memutar video dirancang agar efisien dan mudah digunakan.
 
-1.  **Panggil Detail Episode**: Pertama, panggil endpoint `GET /anime/{slug}/episode/{episode_slug}`.
-    - API akan memeriksa databasenya. Jika data stream untuk episode ini tidak ada, API akan melakukan scraping, menyimpannya ke database, lalu mengirimkan hasilnya.
-    - Respons dari endpoint ini akan berisi daftar stream yang tersedia, lengkap dengan `provider`, `quality`, dan sebuah `stream_url` yang sudah jadi.
+1.  **Panggil Detail Episode**: Pertama, panggil endpoint `GET /anime/{slug}/episode/{episode_identifier}`.
+    -   `{slug}`: Slug anime yang ingin dicari. Bisa berupa slug bersih (misal: `one-piece`) atau slug spesifik dari hasil pencarian (misal: `one-piece-season-20`).
+    -   `{episode_identifier}`: Nomor episode (misal: `1088`) atau identifier untuk episode spesial (misal: `spesial`).
+    -   API akan memeriksa databasenya. Jika data stream untuk episode ini tidak ada, API akan melakukan scraping, menyimpannya ke database, lalu mengirimkan hasilnya.
+    -   Respons dari endpoint ini akan berisi daftar stream yang tersedia, lengkap dengan `provider`, `quality`, `source` (sumber scrape), dan sebuah `stream_url` yang sudah jadi.
 
 2.  **Gunakan `stream_url`**: Di aplikasi Anda, gunakan `stream_url` yang didapat dari langkah pertama untuk memutar video. URL ini mengarah ke proxy streaming API, yang akan menangani semua detail teknis untuk memastikan video dapat diputar.
 
@@ -89,8 +92,8 @@ Alur kerja untuk mendapatkan dan memutar video dirancang agar efisien dan mudah 
 -   `GET /top10`: Menampilkan 10 anime teratas minggu ini dari cache.
 -   `GET /search?q={keyword}`: Mencari anime.
 -   `GET /anime/genre/{slug}`: Mencari anime berdasarkan genre.
--   `GET /anime/{slug}`: Mendapatkan detail lengkap sebuah anime.
--   `GET /anime/{slug}/episode/{episode_slug}`: Mendapatkan daftar stream video yang tersedia untuk sebuah episode. **(Langkah 1)**
+-   `GET /anime/{slug}`: Mendapatkan detail lengkap sebuah anime. Responsnya kini berisi array `episodes` dengan format `{ "title": "...", "episode": "..." }`.
+-   `GET /anime/{slug}/episode/{episode_identifier}`: Mendapatkan daftar stream video yang tersedia untuk sebuah episode. **(Langkah 1)**
 -   `GET /anime/stream/{episode_slug}.mp4`: Memutar video berdasarkan `provider` dan `quality` yang dipilih. **(Langkah 2)**
 
 *(Untuk daftar lengkap endpoint admin, silakan merujuk ke dokumentasi interaktif di /docs)*
