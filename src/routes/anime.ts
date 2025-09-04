@@ -3,7 +3,7 @@ import { getAnime, getEpisodeStream } from "../lib/samehadaku_scraper";
 import { db } from "../db/schema";
 import { getOploverzEpisodeStream } from "../lib/oploverz_scraper";
 import { scheduleBackup } from "../lib/backup";
-import { resolveSamehadakuSlug } from "../lib/anilist_mapper";
+import { resolveSlugs } from "../lib/slug_resolver";
 
 function parseServerString(server: string, embedUrl: string): { provider: string | null, quality: string } {
     if (!server) return { provider: null, quality: "default" };
@@ -36,44 +36,33 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
   .get("/:slug", async ({ params, set }) => {
     const { slug } = params;
 
-    // First, check for manually added anime in the DB.
-    const manualAnime = db.query(`SELECT * FROM animes WHERE slug = ?`).get(slug) as any;
-    if (manualAnime) {
-        const manualEpisodes = db.query(`SELECT episode_slug, episode_title FROM episodes WHERE anime_slug = ?`).all(slug) as { episode_slug: string, episode_title: string }[];
-        
-        manualAnime.episodes = manualEpisodes.map(ep => {
-            const episodeMatch = ep.episode_slug.match(/episode-(\d+)/);
-            return {
-                title: ep.episode_title,
-                episode: episodeMatch ? episodeMatch[1] : "0"
-            };
-        });
-        manualAnime.genres = []; // Genres are not stored for manual entries in this structure
-        return manualAnime;
-    }
-
-    const resolvedSlug = await resolveSamehadakuSlug(slug);
-    if (!resolvedSlug) {
+    const resolved = await resolveSlugs(slug);
+    if (!resolved?.samehadaku_slug) {
         set.status = 404;
-        return { message: `Anime with slug '${slug}' could not be found or mapped.` };
+        return { message: `Anime with slug '${slug}' could not be found or mapped to a Samehadaku entry.` };
     }
 
     // Fetch anime details using the resolved Samehadaku slug.
-    return getAnime(resolvedSlug.replace(/\/anime\/|\//g, ""));
+    return getAnime(resolved.samehadaku_slug);
 
-  }, { detail: { summary: 'Get Anime Details by Slug', description: 'Accepts a clean (Anilist-style) or Samehadaku-style slug and returns the anime details.', tags: ['Anime'] } })
+  }, { 
+      detail: { 
+          summary: 'Get Anime Details by Anilist Slug', 
+          description: 'Accepts a clean Anilist-style slug and returns the anime details from the first available provider.', 
+          tags: ['Anime'] 
+        }
+    })
 
   .get("/:slug/episode/:episode_identifier", async ({ params, set }) => {
     const { slug, episode_identifier } = params;
 
-    const samehadakuBaseSlug = await resolveSamehadakuSlug(slug);
-    if (!samehadakuBaseSlug) {
+    const resolved = await resolveSlugs(slug);
+    if (!resolved?.samehadaku_slug) {
         set.status = 404;
         return { message: `Anime with slug '${slug}' could not be found or mapped.` };
     }
 
-    const cleanedBaseSlug = samehadakuBaseSlug.replace(/\/anime\/|\//g, "");
-    const constructedEpisodeSlug = `${cleanedBaseSlug}-episode-${episode_identifier}`;
+    const constructedEpisodeSlug = `${resolved.samehadaku_slug}-episode-${episode_identifier}`;
     let title = `${slug} Episode ${episode_identifier}`;
 
     let streamsFromDb = db.query(
@@ -82,6 +71,9 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
 
     if (streamsFromDb.length === 0) {
         console.log(`[Cache] No streams found in DB for ${constructedEpisodeSlug}. Scraping...`);
+        
+        // For now, we still rely on the Samehadaku slug to find the Oploverz episode.
+        // This can be improved later if Oploverz mapping is also added to the resolver.
         const [samehadakuResult, oploverzResult] = await Promise.all([
             getEpisodeStream(constructedEpisodeSlug),
             getOploverzEpisodeStream(constructedEpisodeSlug)
@@ -111,7 +103,6 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
             scheduleBackup();
             console.log(`[Cache] Saved ${freshStreams.length} new streams to DB for ${constructedEpisodeSlug}.`);
             
-            // Use the freshly scraped data directly for the response, no need to re-read from DB.
             streamsFromDb = freshStreams.map(stream => {
                 const { provider, quality } = parseServerString(stream.server, stream.embed_url);
                 return {
@@ -156,7 +147,7 @@ export const animeRoutes = new Elysia({ prefix: "/anime" })
     }),
     detail: {
         summary: "Get Episode Streams by Number",
-        description: "Returns available streams for a specific episode number using a consistent anime slug. It uses a cache-first strategy. If streams are not in the database, it will scrape them and store them for future requests.",
+        description: "Fetches streams for an episode. It resolves the Anilist slug to a provider slug, then uses a cache-first strategy. If streams are not in the database, it will scrape them and store them for future requests.",
         tags: ["Anime"],
     },
     response: {

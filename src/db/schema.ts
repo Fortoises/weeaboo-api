@@ -62,6 +62,14 @@ const schema = `
       cover TEXT,
       rating TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS slug_mappings (
+      anilist_slug TEXT PRIMARY KEY,
+      samehadaku_slug TEXT,
+      oploverz_slug TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
 `;
 
 db.exec(schema);
